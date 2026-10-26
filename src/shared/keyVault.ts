@@ -1,0 +1,122 @@
+/** Credential vault boundary. The API key never crosses this as a status field. */
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+export type KeySaveResult = 'saved' | 'unavailable' | 'rejected';
+
+export interface KeyVault {
+  available(): boolean;
+  prepare(): Promise<void>;
+  save(secret: string): Promise<KeySaveResult>;
+  present(): boolean;
+  load(): Promise<string | null>;
+  clear(): void;
+}
+
+export interface AsyncCipher {
+  isAvailable(): Promise<boolean>;
+  encrypt(plain: string): Promise<Buffer>;
+  decrypt(encrypted: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>;
+}
+
+export function validateApiKey(raw: string): boolean {
+  const key = raw.trim();
+  return key.length >= 8 && key.length <= 200 && /^[A-Za-z0-9_\-.]+$/.test(key);
+}
+
+export function createMemoryVault(encryptionAvailable = true): KeyVault {
+  let secret: string | null = null;
+  return {
+    available: () => encryptionAvailable,
+    async prepare(): Promise<void> {},
+    async save(value: string): Promise<KeySaveResult> {
+      if (!validateApiKey(value)) {
+        return 'rejected';
+      }
+      if (!encryptionAvailable) {
+        return 'unavailable';
+      }
+      secret = value.trim();
+      return 'saved';
+    },
+    present(): boolean {
+      return encryptionAvailable && secret !== null;
+    },
+    async load(): Promise<string | null> {
+      if (!encryptionAvailable) {
+        return null;
+      }
+      return secret;
+    },
+    clear(): void {
+      secret = null;
+    },
+  };
+}
+
+/** Ciphertext file. `decrypt` may read an older blob and ask for it to be rewritten. */
+export function createFileVault(filePath: string, cipher: AsyncCipher): KeyVault {
+  let encryption: boolean | null = null;
+  const ready = async (): Promise<boolean> => {
+    if (encryption !== null) {
+      return encryption;
+    }
+    try {
+      encryption = await cipher.isAvailable();
+    } catch {
+      encryption = false;
+    }
+    return encryption;
+  };
+  return {
+    available(): boolean {
+      return encryption === true;
+    },
+    async prepare(): Promise<void> {
+      await ready();
+    },
+    async save(secret: string): Promise<KeySaveResult> {
+      if (!validateApiKey(secret)) {
+        return 'rejected';
+      }
+      if (!(await ready())) {
+        return 'unavailable';
+      }
+      try {
+        const cipherText = await cipher.encrypt(secret.trim());
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, cipherText);
+        return 'saved';
+      } catch {
+        return 'unavailable';
+      }
+    },
+    present(): boolean {
+      return encryption === true && fs.existsSync(filePath);
+    },
+    async load(): Promise<string | null> {
+      if (!(await ready()) || !fs.existsSync(filePath)) {
+        return null;
+      }
+      try {
+        const decoded = await cipher.decrypt(fs.readFileSync(filePath));
+        if (!validateApiKey(decoded.result)) {
+          fs.rmSync(filePath, { force: true });
+          return null;
+        }
+        if (decoded.shouldReEncrypt) {
+          const next = await cipher.encrypt(decoded.result);
+          fs.writeFileSync(filePath, next);
+        }
+        return decoded.result;
+      } catch {
+        fs.rmSync(filePath, { force: true });
+        return null;
+      }
+    },
+    clear(): void {
+      fs.rmSync(filePath, { force: true });
+    },
+  };
+}

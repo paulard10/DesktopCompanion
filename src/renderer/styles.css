@@ -1,0 +1,51 @@
+html,
+body,
+.stage,
+canvas {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+.stage {
+  position: relative;
+}
+
+canvas {
+  display: block;
+  touch-action: none;
+}
+
+#chat-trigger {
+  position: absolute;
+  left: 244px;
+  top: 314px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #d7d2c8;
+  border-radius: 50%;
+  background: #fffdf8;
+  color: #121418;
+  box-shadow: 0 0 0 2px rgba(182, 255, 58, 0.85);
+  cursor: pointer;
+}
+
+#chat-trigger[hidden] {
+  display: none;
+}
+
+#chat-trigger:focus-visible {
+  outline: 2px solid #121418;
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #chat-trigger {
+    transition: none;
+  }
+}

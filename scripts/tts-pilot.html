@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DesktopCompanion TTS pilot (dev only)</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 16px;
+        max-width: 720px;
+      }
+      button {
+        margin: 4px 4px 4px 0;
+        padding: 8px 12px;
+      }
+      pre {
+        background: #f4f1ea;
+        padding: 12px;
+        overflow: auto;
+        max-height: 280px;
+      }
+      .hint {
+        color: #5e645f;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>TTS feasibility pilot</h1>
+    <p class="hint">
+      Development only. Nothing plays until you press a button. Use this window to inventory Chromium voices and measure
+      playback. For offline verification, disconnect the network manually, then retry.
+    </p>
+    <label for="voice">Voice</label>
+    <select id="voice"></select>
+    <p>
+      <button type="button" id="refresh">Refresh voices</button>
+      <button type="button" id="play">Play test sentence</button>
+      <button type="button" id="stop">Stop</button>
+      <button type="button" id="cancel-test">Cancel responsiveness test</button>
+    </p>
+    <p id="sentence" aria-live="polite"></p>
+    <pre id="log"></pre>
+    <script>
+      const TEST_SENTENCE = 'Hola. Soy tu compañero de escritorio.';
+      const logEl = document.getElementById('log');
+      const voiceEl = document.getElementById('voice');
+      const sentenceEl = document.getElementById('sentence');
+      let cancelTimer = null;
+
+      function log(line) {
+        logEl.textContent = (logEl.textContent ? logEl.textContent + '\n' : '') + line;
+        logEl.scrollTop = logEl.scrollHeight;
+        if (window.ttsPilot?.report) {
+          window.ttsPilot.report(line);
+        }
+      }
+
+      function listVoices() {
+        const voices = speechSynthesis.getVoices();
+        voiceEl.replaceChildren();
+        const wanted = ['es', 'ca', 'en'];
+        const sorted = [...voices].sort((a, b) => a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name));
+        for (const voice of sorted) {
+          const option = document.createElement('option');
+          option.value = voice.voiceURI;
+          option.textContent =
+            voice.name +
+            ' | lang=' +
+            voice.lang +
+            ' | localService=' +
+            voice.localService +
+            ' | default=' +
+            voice.default;
+          voiceEl.append(option);
+        }
+        log('Chromium voices: ' + voices.length);
+        for (const voice of sorted) {
+          if (wanted.some((prefix) => voice.lang.toLowerCase().startsWith(prefix))) {
+            log(
+              '  ' +
+                voice.name +
+                ' | voiceURI=' +
+                voice.voiceURI +
+                ' | lang=' +
+                voice.lang +
+                ' | localService=' +
+                voice.localService,
+            );
+          }
+        }
+        return voices;
+      }
+
+      function selectedVoice() {
+        const uri = voiceEl.value;
+        return speechSynthesis.getVoices().find((v) => v.voiceURI === uri) ?? null;
+      }
+
+      function speak(label) {
+        speechSynthesis.cancel();
+        const voice = selectedVoice();
+        const utter = new SpeechSynthesisUtterance(TEST_SENTENCE);
+        utter.lang = voice?.lang ?? 'es-ES';
+        if (voice) {
+          utter.voice = voice;
+        }
+        utter.rate = 1;
+        utter.pitch = 1;
+        const t0 = performance.now();
+        let firstBoundary = null;
+        utter.onstart = () => log(label + ' onstart +' + Math.round(performance.now() - t0) + ' ms');
+        utter.onboundary = () => {
+          if (firstBoundary === null) {
+            firstBoundary = performance.now() - t0;
+            log(label + ' first boundary +' + Math.round(firstBoundary) + ' ms (proxy for audible start)');
+          }
+        };
+        utter.onend = () => log(label + ' onend +' + Math.round(performance.now() - t0) + ' ms');
+        utter.onerror = (event) => log(label + ' error ' + event.error);
+        sentenceEl.textContent = 'Speaking: ' + TEST_SENTENCE;
+        speechSynthesis.speak(utter);
+      }
+
+      document.getElementById('refresh').addEventListener('click', () => listVoices());
+      document.getElementById('play').addEventListener('click', () => speak('play'));
+      document.getElementById('stop').addEventListener('click', () => {
+        const t0 = performance.now();
+        speechSynthesis.cancel();
+        log('stop cancel +' + Math.round(performance.now() - t0) + ' ms');
+        sentenceEl.textContent = 'Stopped.';
+      });
+      document.getElementById('cancel-test').addEventListener('click', () => {
+        if (cancelTimer !== null) {
+          clearTimeout(cancelTimer);
+        }
+        speak('cancel-test');
+        const t0 = performance.now();
+        cancelTimer = setTimeout(() => {
+          speechSynthesis.cancel();
+          log('cancel-test auto-cancel +' + Math.round(performance.now() - t0) + ' ms');
+          cancelTimer = null;
+        }, 120);
+      });
+
+      speechSynthesis.onvoiceschanged = () => listVoices();
+      listVoices();
+      log('Ready. Test sentence: ' + TEST_SENTENCE);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,931 @@
+import { sendDisabledReason } from '../shared/chatGate';
+import { shouldFollowTranscript } from '../shared/chatScroll';
+import { MAX_CHAT_CHARS, validateChatText, type ChatLine } from '../shared/demoConversation';
+import type { ChatStatusMessage, TtsSettingsMessage } from '../shared/ipc';
+import { PABLO_VOICE_NAME } from '../shared/textToSpeech';
+import { transcriptPlacement } from '../shared/speechAudio.ts';
+import {
+  classifyVoiceError,
+  createVoiceSession,
+  shouldSpeakCompletedReply,
+  voicePhaseLabel,
+} from '../shared/voiceSession.ts';
+import { createChromiumTtsProvider } from './chromiumTtsProvider.ts';
+import { SpeechCapture } from './speechCapture.ts';
+
+declare global {
+  interface ImportMeta {
+    readonly env: { readonly DEV: boolean };
+  }
+}
+
+const thread = document.querySelector<HTMLElement>('#thread');
+const log = document.querySelector<HTMLOListElement>('#log');
+const empty = document.querySelector<HTMLElement>('#empty');
+const jump = document.querySelector<HTMLButtonElement>('#jump');
+const form = document.querySelector<HTMLFormElement>('#composer');
+const draft = document.querySelector<HTMLTextAreaElement>('#draft');
+const send = document.querySelector<HTMLButtonElement>('#send');
+const stop = document.querySelector<HTMLButtonElement>('#stop');
+const live = document.querySelector<HTMLElement>('#live');
+const closeButton = document.querySelector<HTMLButtonElement>('#close');
+const minimizeButton = document.querySelector<HTMLButtonElement>('#minimize');
+const status = document.querySelector<HTMLElement>('#status');
+const thinking = document.querySelector<HTMLElement>('#thinking');
+const preflight = document.querySelector<HTMLElement>('#preflight');
+const notice = document.querySelector<HTMLElement>('#notice');
+const usage = document.querySelector<HTMLElement>('#usage');
+const keyState = document.querySelector<HTMLElement>('#key-state');
+const endpoint = document.querySelector<HTMLInputElement>('#endpoint');
+const apiKey = document.querySelector<HTMLInputElement>('#api-key');
+const saveEndpoint = document.querySelector<HTMLButtonElement>('#save-endpoint');
+const saveKey = document.querySelector<HTMLButtonElement>('#save-key');
+const removeKey = document.querySelector<HTMLButtonElement>('#remove-key');
+const disclosure = document.querySelector<HTMLElement>('#disclosure');
+const clearButton = document.querySelector<HTMLButtonElement>('#clear');
+const mic = document.querySelector<HTMLButtonElement>('#mic');
+const speechControls = document.querySelector<HTMLElement>('#speech-controls');
+const speechState = document.querySelector<HTMLElement>('#speech-state');
+const speechStop = document.querySelector<HTMLButtonElement>('#speech-stop');
+const speechCancel = document.querySelector<HTMLButtonElement>('#speech-cancel');
+const speechStaged = document.querySelector<HTMLElement>('#speech-staged');
+const speechText = document.querySelector<HTMLElement>('#speech-text');
+const speechInsert = document.querySelector<HTMLButtonElement>('#speech-insert');
+const speechDiscard = document.querySelector<HTMLButtonElement>('#speech-discard');
+const speechError = document.querySelector<HTMLElement>('#speech-error');
+const ttsBar = document.querySelector<HTMLElement>('#tts-bar');
+const ttsStatus = document.querySelector<HTMLElement>('#tts-status');
+const ttsStop = document.querySelector<HTMLButtonElement>('#tts-stop');
+const ttsError = document.querySelector<HTMLElement>('#tts-error');
+const ttsEnabled = document.querySelector<HTMLInputElement>('#tts-enabled');
+const ttsAutoRead = document.querySelector<HTMLInputElement>('#tts-autoread');
+const ttsRate = document.querySelector<HTMLInputElement>('#tts-rate');
+const ttsVoiceLine = document.querySelector<HTMLElement>('#tts-voice-line');
+const conversationMode = document.querySelector<HTMLInputElement>('#conversation-mode');
+const voicePhase = document.querySelector<HTMLElement>('#voice-phase');
+
+const bridge = window.chat;
+let shown: ChatLine[] = [];
+let stickToBottom = true;
+let streamItem: HTMLLIElement | null = null;
+let generating = false;
+
+if (
+  !thread ||
+  !log ||
+  !empty ||
+  !jump ||
+  !form ||
+  !draft ||
+  !send ||
+  !stop ||
+  !live ||
+  !closeButton ||
+  !minimizeButton ||
+  !status ||
+  !thinking ||
+  !preflight ||
+  !notice ||
+  !usage ||
+  !keyState ||
+  !endpoint ||
+  !apiKey ||
+  !saveEndpoint ||
+  !saveKey ||
+  !removeKey ||
+  !disclosure ||
+  !clearButton ||
+  !mic || !speechControls || !speechState || !speechStop || !speechCancel ||
+  !speechStaged || !speechText || !speechInsert || !speechDiscard || !speechError ||
+  !ttsBar || !ttsStatus || !ttsStop || !ttsError || !ttsEnabled || !ttsAutoRead || !ttsRate || !ttsVoiceLine ||
+  !conversationMode || !voicePhase ||
+  !bridge
+) {
+  console.error('desktop-companion: chat page is incomplete');
+} else {
+  const history = log;
+  const composer = draft;
+  const announce = live;
+  const follow = jump;
+  const statusLine = status;
+  const thinkingLine = thinking;
+  const preflightLine = preflight;
+  const noticeLine = notice;
+  const usageLine = usage;
+  const keyLine = keyState;
+  const endpointInput = endpoint;
+  const keyInput = apiKey;
+  const micButton = mic;
+  const voiceControls = speechControls;
+  const voiceState = speechState;
+  const voiceStop = speechStop;
+  const voiceCancel = speechCancel;
+  const voiceStaged = speechStaged;
+  const voiceText = speechText;
+  const voiceInsert = speechInsert;
+  const voiceDiscard = speechDiscard;
+  const voiceError = speechError;
+  let draftBeforeRecording = '';
+  let pendingTranscript = '';
+  let speech: SpeechCapture;
+  let ttsSettings: TtsSettingsMessage = { enabled: true, autoRead: false, conversation: false, rate: 1 };
+  let speakingItem: HTMLLIElement | null = null;
+  let pabloReady: boolean | null = null;
+  let lastSendReason = '';
+  let capturePose: 'ATTENTIVE' | 'THINKING' | 'IDLE' | 'ERROR' | 'CLEAR' = 'CLEAR';
+  const voice = createVoiceSession();
+  const tts = createChromiumTtsProvider({
+    onState() {
+      refreshTtsUi();
+    },
+    onSpeaking(active) {
+      bridge.notifyTtsSpeaking(active);
+      refreshTtsUi();
+    },
+    onVoices(voices, picked, phase) {
+      pabloReady = picked !== null;
+      if (picked) {
+        clearTtsError();
+        ttsVoiceLine.textContent = `Voice: ${picked.name} (${picked.lang || 'es-ES'}) on this PC.`;
+      } else if (phase === 'pending') {
+        ttsVoiceLine.textContent = 'Checking installed Spanish voices…';
+        clearTtsError();
+      } else {
+        ttsVoiceLine.textContent = 'Microsoft Pablo (es-ES) was not found.';
+        showTtsError('Microsoft Pablo (es-ES) was not found. Speech stays off. You can still send text messages.');
+      }
+      refreshTtsUi();
+      bridge.reportTtsVoices({
+        count: voices.length,
+        pablo: picked !== null,
+        phase,
+        voices: voices.slice(0, 24).map((voice) => ({
+          name: voice.name.slice(0, 120),
+          lang: voice.lang.slice(0, 32),
+          voiceURI: voice.voiceURI.slice(0, 160),
+          localService: voice.localService,
+        })),
+      });
+    },
+  });
+
+  const showTtsError = (message: string): void => {
+    ttsError.textContent = message;
+    ttsError.hidden = false;
+  };
+  const clearTtsError = (): void => {
+    ttsError.textContent = '';
+    ttsError.hidden = true;
+  };
+  const noteCapture = (pose: 'ATTENTIVE' | 'THINKING' | 'IDLE' | 'ERROR' | 'CLEAR'): void => {
+    if (pose === capturePose) {
+      return;
+    }
+    capturePose = pose;
+    bridge.notifyVoicePresence(pose);
+  };
+  const renderVoice = (): void => {
+    const enabled = ttsSettings.conversation;
+    const label = voicePhaseLabel(voice.phase(), voice.errorKind(), enabled);
+    voicePhase.hidden = !enabled;
+    voicePhase.textContent = label;
+  };
+  const releaseVoice = (): void => {
+    voice.apply('close');
+    renderVoice();
+  };
+  const maybeSpeakArmed = (): void => {
+    const last = shown[shown.length - 1];
+    if (!last || !shouldSpeakCompletedReply({
+      conversation: ttsSettings.conversation,
+      armed: voice.armed(),
+      alreadySpoken: voice.spoken(),
+      role: last.role,
+      busy: generating,
+      streaming: streamItem !== null,
+      error: voice.phase() === 'ERROR',
+    })) {
+      return;
+    }
+    const item = history.lastElementChild;
+    if (!(item instanceof HTMLLIElement)) {
+      return;
+    }
+    const token = voice.token();
+    if (!voice.claim(token)) {
+      return;
+    }
+    voice.apply('speak');
+    renderVoice();
+    void speakReply(last.text, item).finally(() => {
+      if (voice.phase() === 'SPEAKING') {
+        voice.apply('done');
+      }
+      renderVoice();
+    });
+  };
+  const refreshTtsUi = (): void => {
+    const speaking = tts.state() === 'speaking';
+    ttsBar.hidden = !speaking;
+    ttsStatus.textContent = speaking ? `Speaking · ${PABLO_VOICE_NAME}` : '';
+    for (const button of history.querySelectorAll<HTMLButtonElement>('.speak-reply')) {
+      button.disabled = !ttsSettings.enabled || speaking || speech.currentState !== 'idle' || pabloReady === false;
+    }
+    refreshSend();
+  };
+  const showSpeechError = (message: string): void => {
+    voiceError.textContent = message;
+    voiceError.hidden = false;
+    noteCapture('ERROR');
+    if (ttsSettings.conversation) {
+      voice.apply('fail', classifyVoiceError(message));
+      renderVoice();
+    }
+  };
+  const clearSpeechError = (): void => {
+    voiceError.textContent = '';
+    voiceError.hidden = true;
+  };
+  const refreshSpeech = (state: 'idle' | 'requesting' | 'recording' | 'transcribing', seconds: number): void => {
+    voiceControls.hidden = state === 'idle';
+    voiceControls.dataset.state = state;
+    voiceStop.hidden = state !== 'recording';
+    voiceState.textContent = state === 'recording'
+      ? `● Recording locally · ${seconds.toFixed(1)} / 20 s`
+      : state === 'requesting' ? 'Requesting microphone access…'
+        : state === 'transcribing' ? 'Transcribing locally…' : '';
+    micButton.disabled = state !== 'idle' || generating || tts.state() === 'speaking';
+    if (state === 'requesting' || state === 'recording') {
+      noteCapture('ATTENTIVE');
+    } else if (state === 'transcribing') {
+      noteCapture('THINKING');
+    } else if (capturePose === 'ATTENTIVE' || capturePose === 'THINKING') {
+      noteCapture('CLEAR');
+    }
+    if (ttsSettings.conversation) {
+      if (state === 'requesting' || state === 'recording') {
+        voice.apply('mic');
+      } else if (state === 'transcribing') {
+        voice.apply('asr');
+      } else if (voice.phase() === 'RECORDING' || voice.phase() === 'CANCELLING') {
+        voice.apply(voice.phase() === 'CANCELLING' ? 'released' : 'cancel');
+        if (voice.phase() === 'CANCELLING') {
+          voice.apply('released');
+        }
+      }
+      renderVoice();
+    }
+    refreshTtsUi();
+  };
+  speech = new SpeechCapture(bridge, refreshSpeech, (text) => {
+    noteCapture('IDLE');
+    if (text.length > MAX_CHAT_CHARS) {
+      showSpeechError('Transcript is too long for one message.');
+      return;
+    }
+    if (transcriptPlacement(draftBeforeRecording, composer.value) === 'insert') {
+      composer.value = text;
+      if (ttsSettings.conversation) {
+        voice.apply('transcript');
+        renderVoice();
+      }
+      refreshSend();
+      composer.focus();
+      return;
+    }
+    pendingTranscript = text;
+    voiceText.textContent = text;
+    voiceStaged.hidden = false;
+    if (ttsSettings.conversation) {
+      voice.apply('transcript');
+      renderVoice();
+    }
+  }, showSpeechError);
+
+  composer.maxLength = MAX_CHAT_CHARS;
+
+  const refreshSend = (): void => {
+    const reason = sendDisabledReason({
+      generating,
+      microphoneBusy: speech.currentState !== 'idle',
+      ttsSpeaking: tts.state() === 'speaking',
+      draftValid: validateChatText(composer.value).ok,
+    });
+    send.disabled = reason !== null;
+    micButton.disabled = generating || speech.currentState !== 'idle' || tts.state() === 'speaking';
+    const label = reason ?? 'ready';
+    if (label !== lastSendReason) {
+      lastSendReason = label;
+      bridge.reportSendGate(label);
+    }
+  };
+
+  const scrollToEnd = (): void => {
+    thread.scrollTop = thread.scrollHeight;
+    stickToBottom = true;
+    follow.hidden = true;
+  };
+
+  const append = (line: ChatLine): void => {
+    history.append(renderLine(line));
+    empty.hidden = true;
+    if (line.role !== 'user') {
+      announce.textContent = `${label(line.role)}. ${line.text}`;
+    }
+  };
+
+  async function speakReply(text: string, item: HTMLLIElement): Promise<void> {
+    clearTtsError();
+    if (!ttsSettings.enabled) {
+      return;
+    }
+    if (pabloReady === false) {
+      showTtsError('Microsoft Pablo is unavailable.');
+      noteCapture('ERROR');
+      return;
+    }
+    if (speech.currentState !== 'idle') {
+      return;
+    }
+    noteCapture('CLEAR');
+    tts.stop();
+    speakingItem?.classList.remove('is-speaking');
+    speakingItem = item;
+    speakingItem.classList.add('is-speaking');
+    const gate = new AbortController();
+    try {
+      const outcome = await tts.speak(text, { rate: ttsSettings.rate, signal: gate.signal });
+      if (outcome === 'failed') {
+        showTtsError('Could not speak with Microsoft Pablo. Check Windows speech settings.');
+        noteCapture('ERROR');
+      }
+    } finally {
+      speakingItem?.classList.remove('is-speaking');
+      if (speakingItem === item) {
+        speakingItem = null;
+      }
+      refreshTtsUi();
+    }
+  }
+
+  const maybeAutoRead = (added: readonly ChatLine[]): void => {
+    if (ttsSettings.conversation) {
+      return;
+    }
+    if (
+      ttsSettings.autoRead &&
+      ttsSettings.enabled &&
+      added.length === 1 &&
+      added[0]?.role !== 'user' &&
+      speech.currentState === 'idle' &&
+      tts.state() === 'idle'
+    ) {
+      const line = added[0];
+      const item = history.lastElementChild;
+      if (line && item instanceof HTMLLIElement) {
+        void speakReply(line.text, item);
+      }
+    }
+  };
+
+  const showHistory = (lines: readonly ChatLine[]): void => {
+    if (streamItem) {
+      streamItem = null;
+      history.replaceChildren();
+      shown = [];
+    }
+    const extended =
+      lines.length >= shown.length &&
+      shown.every((line, index) => line.role === lines[index]?.role && line.text === lines[index]?.text);
+    const added = extended ? lines.slice(shown.length) : lines;
+    const distanceFromBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+    if (thread.clientHeight > 0) {
+      stickToBottom = shouldFollowTranscript(distanceFromBottom);
+    }
+    if (!extended) {
+      tts.stop();
+      speakingItem = null;
+      history.replaceChildren();
+    }
+    for (const line of added) {
+      append(line);
+    }
+    shown = lines.slice();
+    empty.hidden = lines.length > 0;
+    if (stickToBottom) {
+      scrollToEnd();
+      if (extended) {
+        maybeAutoRead(added);
+        maybeSpeakArmed();
+      }
+      return;
+    }
+    if (!extended) {
+      thread.scrollTop = Math.max(0, thread.scrollHeight - thread.clientHeight - distanceFromBottom);
+    }
+    if (added.some((line) => line.role !== 'user')) {
+      follow.hidden = false;
+    }
+    if (extended) {
+      maybeAutoRead(added);
+      maybeSpeakArmed();
+    }
+  };
+
+  const showDelta = (text: string): void => {
+    let body = streamItem?.querySelector('p');
+    if (!streamItem || !body) {
+      streamItem = renderLine({ role: 'assistant', text }, true);
+      body = streamItem.querySelector('p');
+      history.append(streamItem);
+      empty.hidden = true;
+    }
+    if (body) {
+      body.textContent = text;
+    }
+    announce.textContent = `Companion. ${text}`;
+    if (stickToBottom) {
+      scrollToEnd();
+    } else {
+      follow.hidden = false;
+    }
+  };
+
+  thread.addEventListener('scroll', () => {
+    const distance = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+    stickToBottom = shouldFollowTranscript(distance);
+    if (stickToBottom) {
+      follow.hidden = true;
+    }
+  });
+
+  follow.addEventListener('click', scrollToEnd);
+  closeButton.addEventListener('click', () => {
+    speech.cancel();
+    tts.stop();
+    releaseVoice();
+    bridge.closeChat();
+  });
+  minimizeButton.addEventListener('click', () => {
+    speech.cancel();
+    tts.stop();
+    releaseVoice();
+    bridge.minimizeChat();
+  });
+  micButton.addEventListener('click', () => {
+    if (voice.phase() === 'SPEAKING') {
+      voice.apply('cancel');
+      voice.apply('released');
+    }
+    tts.stop();
+    if (generating || speech.currentState !== 'idle') return;
+    if (pendingTranscript) {
+      showSpeechError('Insert or discard the previous transcript first.');
+      return;
+    }
+    clearSpeechError();
+    draftBeforeRecording = composer.value;
+    void speech.start();
+  });
+  voiceStop.addEventListener('click', () => { void speech.stop(); });
+  voiceCancel.addEventListener('click', () => {
+    if (ttsSettings.conversation) {
+      voice.apply('cancel');
+    }
+    speech.cancel();
+    renderVoice();
+  });
+  voiceInsert.addEventListener('click', () => {
+    const separator = composer.value.trim() ? '\n' : '';
+    if (composer.value.length + separator.length + pendingTranscript.length > MAX_CHAT_CHARS) {
+      showSpeechError('The combined draft is too long. Edit the draft before inserting.');
+      return;
+    }
+    composer.value += separator + pendingTranscript;
+    pendingTranscript = '';
+    voiceStaged.hidden = true;
+    refreshSend();
+    composer.focus();
+  });
+  voiceDiscard.addEventListener('click', () => {
+    pendingTranscript = '';
+    voiceText.textContent = '';
+    voiceStaged.hidden = true;
+  });
+  bridge.onSpeechForceStop(() => {
+    speech.cancel();
+    tts.stop();
+    releaseVoice();
+  });
+  bridge.onTtsForceStop(() => {
+    tts.stop();
+    if (voice.phase() === 'SPEAKING') {
+      voice.apply('cancel');
+      voice.apply('released');
+      renderVoice();
+    }
+  });
+  window.addEventListener('pagehide', () => {
+    speech.cancel();
+    tts.dispose();
+    releaseVoice();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && speech.currentState !== 'idle') speech.cancel();
+  });
+  window.addEventListener('blur', () => {
+    if (speech.currentState === 'recording') speech.cancel('Recording stopped when chat lost focus.');
+  });
+  stop.addEventListener('click', () => {
+    if (ttsSettings.conversation && (voice.phase() === 'WAITING_FOR_AI' || voice.phase() === 'AI_RESPONDING')) {
+      voice.apply('cancel');
+      voice.apply('released');
+      renderVoice();
+    }
+    bridge.stopGeneration();
+  });
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const validated = validateChatText(composer.value);
+    if (generating || !validated.ok) {
+      return;
+    }
+    if (ttsSettings.conversation) {
+      voice.arm();
+      renderVoice();
+    }
+    noteCapture('CLEAR');
+    bridge.sendMessage(validated.text);
+    composer.value = '';
+    refreshSend();
+    composer.focus();
+  });
+
+  composer.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey || !generating) {
+      return;
+    }
+    event.preventDefault();
+    bridge.stopGeneration();
+    composer.focus();
+  });
+
+  clearButton.addEventListener('click', () => {
+    tts.stop();
+    speech.cancel();
+    voice.apply('reset');
+    noteCapture('CLEAR');
+    renderVoice();
+    bridge.resetConversation();
+    composer.focus();
+  });
+
+  if (import.meta.env.DEV) {
+    const preview = document.createElement('div');
+    preview.className = 'preview';
+    const caption = document.createElement('span');
+    caption.className = 'hint';
+    caption.textContent = 'Dev preview';
+    preview.append(caption);
+    const previewCues = [
+      ['Listening', 'ATTENTIVE'],
+      ['Curious', 'CURIOUS'],
+      ['Thinking', 'THINKING'],
+      ['Responding', 'RESPONDING'],
+      ['Speaking', 'SPEAKING'],
+      ['Happy', 'HAPPY'],
+      ['Error', 'ERROR'],
+      ['Sleeping', 'SLEEPING'],
+      ['Waking', 'WAKING'],
+      ['Blink', 'BLINK'],
+      ['Idle', 'IDLE'],
+    ] as const;
+    let compareTimer = 0;
+    const stopCompare = () => {
+      if (compareTimer !== 0) {
+        window.clearInterval(compareTimer);
+        compareTimer = 0;
+        caption.textContent = 'Dev preview';
+      }
+    };
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        stopCompare();
+      }
+    });
+    for (const [label, name] of previewCues) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.addEventListener('click', () => {
+        stopCompare();
+        bridge.previewPresence(name);
+      });
+      preview.append(button);
+    }
+    const pairs = [
+      ['Idle', 'IDLE', 'Listening', 'ATTENTIVE'],
+      ['Listening', 'ATTENTIVE', 'Responding', 'RESPONDING'],
+      ['Thinking', 'THINKING', 'Sleeping', 'SLEEPING'],
+      ['Happy', 'HAPPY', 'Idle', 'IDLE'],
+      ['Curious', 'CURIOUS', 'Error', 'ERROR'],
+    ] as const;
+    const compare = document.createElement('button');
+    compare.type = 'button';
+    compare.textContent = 'Compare';
+    let pairIndex = 0;
+    let side = 0;
+    compare.addEventListener('click', () => {
+      if (compareTimer !== 0) {
+        stopCompare();
+        return;
+      }
+      const show = () => {
+        const pair = pairs[pairIndex] ?? pairs[0];
+        caption.textContent = side === 0 ? pair[0] : pair[2];
+        bridge.previewPresence(side === 0 ? pair[1] : pair[3]);
+        side += 1;
+        if (side > 1) {
+          side = 0;
+          pairIndex = (pairIndex + 1) % pairs.length;
+        }
+      };
+      show();
+      compareTimer = window.setInterval(show, 1400);
+    });
+    preview.append(compare);
+    const diagnostics = document.createElement('div');
+    diagnostics.className = 'preview';
+    const diagnosticCaption = document.createElement('span');
+    diagnosticCaption.className = 'hint';
+    diagnosticCaption.textContent = 'Rig diagnostics';
+    diagnostics.append(diagnosticCaption);
+    const probes = [
+      ['Test left arm', 'PROBE_LEFT'],
+      ['Test right arm', 'PROBE_RIGHT'],
+      ['Test antenna', 'PROBE_ANTENNA'],
+      ['Test body tilt', 'PROBE_BODY'],
+      ['Reset rig', 'PROBE_RESET'],
+    ] as const;
+    for (const [label, name] of probes) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.addEventListener('click', () => {
+        stopCompare();
+        bridge.previewPresence(name);
+        diagnosticCaption.textContent = label;
+      });
+      diagnostics.append(button);
+    }
+    const moveTest = document.createElement('button');
+    moveTest.type = 'button';
+    moveTest.textContent = 'Test window move';
+    moveTest.addEventListener('click', () => {
+      void bridge.testWindowMove().then((result) => {
+        diagnosticCaption.textContent = result.message;
+      });
+    });
+    diagnostics.append(moveTest);
+    const tools = document.querySelector<HTMLDetailsElement>('#developer');
+    const panel = document.querySelector<HTMLElement>('#dev-panel');
+    if (tools && panel) {
+      tools.hidden = false;
+      panel.append(preview, diagnostics);
+    }
+  }
+
+  composer.addEventListener('input', () => {
+    refreshSend();
+    bridge.notifyActivity();
+  });
+
+  for (const input of document.querySelectorAll<HTMLInputElement>('input[name="provider"]')) {
+    input.addEventListener('change', () => {
+      if (input.checked) {
+        bridge.setProvider(input.value === 'qwen' ? 'qwen' : 'demo');
+      }
+    });
+  }
+
+  saveEndpoint.addEventListener('click', () => {
+    bridge.setEndpoint(endpointInput.value);
+  });
+  saveKey.addEventListener('click', () => {
+    bridge.saveKey(keyInput.value);
+    keyInput.value = '';
+  });
+  removeKey.addEventListener('click', () => {
+    bridge.removeKey();
+    keyInput.value = '';
+  });
+
+  bridge.onHistory(showHistory);
+  bridge.onDelta(showDelta);
+  bridge.onStatus((next) => {
+    generating = next.busy;
+    history.setAttribute('aria-busy', next.busy ? 'true' : 'false');
+    if (ttsSettings.conversation) {
+      if (next.presence === 'ERROR') {
+        voice.apply('fail');
+      } else if (next.busy && next.presence === 'RESPONDING') {
+        voice.apply('responding');
+      }
+      renderVoice();
+    }
+    applyStatus(next, {
+      statusLine,
+      thinkingLine,
+      preflightLine,
+      noticeLine,
+      usageLine,
+      keyLine,
+      endpointInput,
+      stop,
+      disclosureLine: disclosure,
+    });
+    refreshSend();
+    maybeSpeakArmed();
+  });
+  bridge.onFocusComposer(() => {
+    composer.focus();
+  });
+  ttsStop.addEventListener('click', () => tts.stop());
+  history.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const button = target.closest<HTMLButtonElement>('.speak-reply');
+    if (!button || button.disabled) {
+      return;
+    }
+    const item = button.closest<HTMLLIElement>('.message');
+    const body = item?.querySelector('p');
+    if (!item || !body) {
+      return;
+    }
+    void speakReply(body.textContent ?? '', item);
+  });
+
+  const applyTtsSettings = (next: TtsSettingsMessage): void => {
+    const wasConversation = ttsSettings.conversation;
+    ttsSettings = next;
+    ttsEnabled.checked = next.enabled;
+    ttsAutoRead.checked = next.autoRead;
+    conversationMode.checked = next.conversation;
+    ttsRate.value = String(next.rate);
+    if (wasConversation && !next.conversation) {
+      tts.stop();
+      speech.cancel();
+      voice.release();
+    }
+    renderVoice();
+    refreshTtsUi();
+  };
+  ttsEnabled.addEventListener('change', () => {
+    bridge.setTtsSettings({ enabled: ttsEnabled.checked });
+  });
+  ttsAutoRead.addEventListener('change', () => {
+    bridge.setTtsSettings({ autoRead: ttsAutoRead.checked });
+  });
+  conversationMode.addEventListener('change', () => {
+    bridge.setTtsSettings({ conversation: conversationMode.checked });
+  });
+  ttsRate.addEventListener('change', () => {
+    bridge.setTtsSettings({ rate: Number(ttsRate.value) });
+  });
+  bridge.onTtsSettings(applyTtsSettings);
+  void bridge.getTtsSettings().then(applyTtsSettings);
+  try {
+    tts.start();
+    refreshSend();
+  } finally {
+    bridge.notifyReady();
+  }
+}
+
+function renderLine(line: ChatLine, streaming = false): HTMLLIElement {
+  const item = document.createElement('li');
+  item.className = `message message-${line.role === 'user' ? 'user' : line.role === 'demo' ? 'demo' : 'assistant'}${streaming ? ' is-streaming' : ''}`;
+  const who = document.createElement('span');
+  who.className = 'who';
+  who.textContent = label(line.role);
+  const body = document.createElement('p');
+  body.textContent = line.text;
+  item.append(who, body);
+  if (line.role === 'assistant' || line.role === 'demo') {
+    const actions = document.createElement('div');
+    actions.className = 'message-actions';
+    const speak = document.createElement('button');
+    speak.type = 'button';
+    speak.className = 'speak-reply';
+    speak.textContent = 'Speak';
+    speak.setAttribute('aria-label', 'Read this reply aloud with Microsoft Pablo');
+    actions.append(speak);
+    item.append(actions);
+  }
+  return item;
+}
+
+function label(role: ChatLine['role']): string {
+  if (role === 'user') {
+    return 'You';
+  }
+  if (role === 'demo') {
+    return 'Demo';
+  }
+  return 'Companion';
+}
+
+function applyStatus(
+  next: ChatStatusMessage,
+  view: {
+    statusLine: HTMLElement;
+    thinkingLine: HTMLElement;
+    preflightLine: HTMLElement;
+    noticeLine: HTMLElement;
+    usageLine: HTMLElement;
+    keyLine: HTMLElement;
+    endpointInput: HTMLInputElement;
+    stop: HTMLButtonElement;
+    disclosureLine: HTMLElement;
+  },
+): void {
+  const qwen = next.provider === 'qwen';
+  view.preflightLine.hidden = !qwen;
+  view.disclosureLine.hidden = !qwen;
+  view.stop.hidden = !next.busy;
+  view.thinkingLine.hidden = !next.busy || (next.presence !== 'THINKING' && next.presence !== 'ATTENTIVE');
+  view.statusLine.textContent = statusLabel(next);
+  for (const input of document.querySelectorAll<HTMLInputElement>('input[name="provider"]')) {
+    input.checked = input.value === next.provider;
+  }
+  if (document.activeElement !== view.endpointInput && next.endpointPreview) {
+    view.endpointInput.value = next.endpointPreview;
+  }
+  view.keyLine.textContent =
+    next.key === 'saved' ? 'Key saved on this PC.' : next.key === 'unavailable' ? 'Secure storage is unavailable.' : 'No key saved.';
+  if (next.notice) {
+    view.noticeLine.hidden = false;
+    view.noticeLine.dataset.outcome = next.notice === 'Stopped.' ? 'cancelled' : 'failed';
+    view.noticeLine.textContent = next.notice;
+  } else {
+    view.noticeLine.hidden = true;
+    delete view.noticeLine.dataset.outcome;
+    view.noticeLine.textContent = '';
+  }
+  const empty = document.querySelector<HTMLElement>('#empty');
+  if (empty && empty.hidden === false) {
+    empty.textContent =
+      next.provider === 'qwen'
+        ? 'Say hello. Replies come from qwen3.7-plus after the Singapore endpoint and API key are saved.'
+        : 'Say hello. Replies are a fixed demonstration, not a connected assistant.';
+  }
+  if (next.usage) {
+    view.usageLine.hidden = false;
+    const reported = [
+      `${next.usage.promptTokens} prompt tokens`,
+      `${next.usage.completionTokens} completion tokens`,
+    ];
+    if (next.usage.reasoningTokens !== null) {
+      reported.push(`${next.usage.reasoningTokens} reasoning tokens`);
+    }
+    if (next.usage.totalTokens !== null) {
+      reported.push(`${next.usage.totalTokens} total tokens`);
+    }
+    view.usageLine.textContent = `Provider reported ${reported.join(', ')} for the latest reply. This is not a bill.`;
+  } else {
+    view.usageLine.hidden = true;
+    view.usageLine.textContent = '';
+  }
+}
+function statusLabel(next: ChatStatusMessage): string {
+  if (next.provider === 'demo') {
+    return 'Demo. No AI connected.';
+  }
+  if (next.presence === 'ATTENTIVE' || next.presence === 'THINKING') {
+    return 'Qwen · thinking';
+  }
+  if (next.presence === 'RESPONDING') {
+    return 'Qwen · replying';
+  }
+  if (next.presence === 'HAPPY') {
+    return 'Qwen · reply complete';
+  }
+  if (next.presence === 'ERROR') {
+    return 'Qwen · needs attention';
+  }
+  if (next.notice === 'Stopped.') {
+    return 'Qwen · stopped';
+  }
+  return 'Qwen · qwen3.7-plus';
+}
