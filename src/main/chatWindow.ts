@@ -22,6 +22,7 @@ import { createSafeCredentialStore } from './safeCredentialStore.js';
 import { createLocalSpeechJob } from './localSpeech.js';
 import { createTtsSettings } from './ttsSettings.js';
 import { clampSpeechRate } from '../shared/textToSpeech.js';
+import { resolveTrayIcon } from '../shared/packagedLayout.js';
 import type { MicrophoneGate } from './security.js';
 
 const ACTIVITY_GAP_MS = 2_000;
@@ -500,7 +501,7 @@ export async function createChatController(options: {
     pageReady = false;
     const created = new BrowserWindow({
       ...createChatChrome(),
-      icon: path.join(__dirname, '../../assets/tray.png'),
+      icon: resolveTrayIcon(__dirname),
       webPreferences: createChatWebPreferences(options.preloadPath, options.dev),
     });
     created.setBackgroundMaterial('none');

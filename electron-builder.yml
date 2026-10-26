@@ -1,0 +1,56 @@
+appId: com.desktopcompanion.shell
+productName: desktop-companion
+executableName: DesktopCompanion
+asar: true
+asarUnpack:
+  - assets/tray.png
+npmRebuild: false
+directories:
+  output: release
+files:
+  - package.json
+  - dist/**/*
+  - assets/tray.png
+  - "!node_modules/**"
+  - "!**/*.map"
+  - "!**/.local-asr/**"
+  - "!**/docs/**"
+  - "!**/references/**"
+  - "!**/graphify-out/**"
+  - "!**/release/**"
+  - "!**/*.{wav,m4a,mp3,log}"
+  - "!**/qwen-key.bin"
+  - "!**/provider-settings.json"
+  - "!**/tts-settings.json"
+  - "!**/user-preferences.json"
+  - "!**/.env"
+  - "!**/.env.*"
+  - "!**/whisper-cli.exe"
+  - "!**/ggml-tiny.bin"
+extraResources: []
+publish: null
+win:
+  target:
+    - target: dir
+      arch:
+        - x64
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icon.ico
+  signAndEditExecutable: true
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: false
+  createStartMenuShortcut: true
+  createDesktopShortcut: false
+  runAfterFinish: false
+  packElevateHelper: false
+  deleteAppDataOnUninstall: false
+  differentialPackage: false
+  shortcutName: DesktopCompanion
+  uninstallDisplayName: DesktopCompanion
+  include: installer.nsh
+  artifactName: DesktopCompanion-Setup-${version}-${arch}.${ext}

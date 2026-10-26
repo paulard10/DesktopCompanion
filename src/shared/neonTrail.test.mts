@@ -220,7 +220,7 @@ test('the trail window stays click-through, unfocused, and off until asked', () 
   assert.match(trail, /preload-error/);
   assert.match(trail, /showMarker/);
   assert.match(trail, /existsSync/);
-  assert.match(main, /if \(!devMovement\)/);
+  assert.match(main, /if \(!dev\)/);
   assert.match(main, /devMarker: dev/);
   assert.match(tray, /devMarker/);
   assert.match(tray, /Show Trail Marker/);

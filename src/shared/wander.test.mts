@@ -308,7 +308,7 @@ test('quiet time and a recent interaction delay the departure', () => {
   assert.ok(touched.scheduleAt != null && touched.scheduleAt >= (enabled.scheduleAt ?? 0) - 1_000 + WANDER_QUIET_MS);
 });
 
-test('the scheduler is one timeout, wandering stays in development, and it does not touch input or models', () => {
+test('the scheduler is one timeout, wandering is a tray choice, and it does not touch input or models', () => {
   const wander = readFileSync(path.join(root, 'src/shared/wander.ts'), 'utf8');
   const main = readFileSync(path.join(root, 'src/main/main.ts'), 'utf8');
   const overlay = readFileSync(path.join(root, 'src/main/overlayWindow.ts'), 'utf8');
@@ -350,10 +350,12 @@ test('the scheduler is one timeout, wandering stays in development, and it does 
   assert.equal(readFileSync(path.join(root, 'src/shared/behavior.ts'), 'utf8').includes('neonTrail'), false);
   assert.match(readFileSync(path.join(root, 'src/preload/preload.ts'), 'utf8'), /360_000/);
   assert.equal(main.includes('setInterval'), false);
-  assert.match(main, /if \(!devMovement\)/);
-  assert.match(tray, /Enable Wandering/);
-  assert.match(tray, /Disable Wandering/);
-  assert.match(tray, /Return home/);
+  const wanderRun = main.slice(main.indexOf('const runWander'), main.indexOf('const runMoveTest'));
+  assert.equal(wanderRun.includes('devMovement'), false);
+  assert.equal(wanderRun.includes('DESKTOP_COMPANION_DEV'), false);
+  assert.match(tray, /label: 'Wandering'/);
+  assert.match(tray, /type: 'checkbox'/);
+  assert.match(tray, /label: 'Return Home'/);
   assert.match(overlay, /setIgnoreMouseEvents\(true\)/);
   assert.equal(overlay.includes('.focus('), false);
   assert.match(overlay, /onTrail\?/);

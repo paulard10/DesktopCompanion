@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { app, Menu, screen, type Tray } from 'electron';
+import { app, Menu, screen } from 'electron';
 import { createChatController, type ChatController } from './chatWindow.js';
 import { checkDisposableCredential } from './safeCredentialStore.js';
 import { registerAppProtocol, registerAppScheme } from './protocol.js';
@@ -9,6 +9,7 @@ import { installSecurityPolicy } from './security.js';
 import { createOverlayWindow, preloadPath, rendererRoot, type OverlayController } from './overlayWindow.js';
 import { createTrailWindow, type TrailController } from './trailWindow.js';
 import { createTray } from './tray.js';
+import { createUserPreferencesStore, type UserPreferencesStore } from '../shared/userPreferences.js';
 import { MOVE_TEST_DIP, travelBlock } from '../shared/desktopMovement.js';
 import {
   WANDER_EXPLORE_MS,
@@ -43,7 +44,9 @@ if (!gotLock) {
 let overlay: OverlayController | null = null;
 let chat: ChatController | null = null;
 let trail: TrailController | null = null;
-let tray: Tray | null = null;
+let tray: { destroy: () => void; refresh: () => void } | null = null;
+let trailOn = false;
+let preferences: UserPreferencesStore | null = null;
 let quitting = false;
 let smokeTimer: NodeJS.Timeout | null = null;
 let wanderTimer: ReturnType<typeof setTimeout> | null = null;
@@ -74,6 +77,7 @@ async function shutdown(): Promise<void> {
   }
   quitting = true;
   wanderClosed = true;
+  preferences?.close();
   clearWanderTimer();
   clearLeaseTimer();
   console.log('desktop-companion: quitting');
@@ -115,6 +119,8 @@ void app.whenReady().then(async () => {
     return;
   }
   console.log('desktop-companion: process-started');
+  const preferenceStore = createUserPreferencesStore(path.join(app.getPath('userData'), 'companion', 'user-preferences.json'));
+  preferences = preferenceStore;
 
   Menu.setApplicationMenu(null);
   app.setAppUserModelId('com.desktopcompanion.shell');
@@ -186,6 +192,9 @@ void app.whenReady().then(async () => {
     onDisplayChanged: () => runWander(),
     onFirstFrame: () => {
       console.log('desktop-companion: frame-ready');
+      if (!quitting && preferenceStore.current().startAwake) {
+        overlay?.wake();
+      }
       if (!smoke) {
         return;
       }
@@ -199,7 +208,6 @@ void app.whenReady().then(async () => {
     },
   });
 
-  const devMovement = dev || process.env.DESKTOP_COMPANION_MOVE === '1';
   let wander: WanderState = createWanderState();
   let wanderHold = '';
   let publishedExplore: number | null = null;
@@ -275,6 +283,7 @@ void app.whenReady().then(async () => {
   };
 
   const applyWander = (plan: WanderPlan): void => {
+    const wasEnabled = wander.enabled;
     wander = plan.state;
     clearWanderTimer();
     publishExplore(wander.enabled ? wander.exploreUntil : null);
@@ -299,14 +308,16 @@ void app.whenReady().then(async () => {
         overlay?.moveBy(plan.command, plan.hopDip ?? undefined);
       }
     }
-    if (plan.scheduleAt == null || !wander.enabled || wanderClosed) {
-      return;
+    if (plan.scheduleAt != null && wander.enabled && !wanderClosed) {
+      armWanderTimer(plan.scheduleAt);
     }
-    armWanderTimer(plan.scheduleAt);
+    if (wasEnabled !== wander.enabled) {
+      tray?.refresh();
+    }
   };
 
   const runWander = (): void => {
-    if (wanderClosed || !devMovement || !wander.enabled || !overlay) {
+    if (wanderClosed || !wander.enabled || !overlay) {
       return;
     }
     const view = overlay.wanderView();
@@ -317,6 +328,9 @@ void app.whenReady().then(async () => {
   };
 
   const runMoveTest = (source: 'tray' | 'chat'): { received: boolean; block: 'chat' | 'voice' | 'busy' | 'none'; message: string } => {
+    if (!dev) {
+      return { received: false, block: 'none', message: 'Move test is a development control.' };
+    }
     const activity = chat?.activity();
     const block = travelBlock({
       chatOpen: activity?.open ?? false,
@@ -348,12 +362,18 @@ void app.whenReady().then(async () => {
     runWander();
   };
 
-  trail = createTrailWindow({
+  const trailWindow = createTrailWindow({
     dev,
     preloadPath: path.join(preloadPath(), '../trailPreload.js'),
     raiseAvatar: () => overlay?.moveTop(),
     isChatOpen: () => chat?.activity().open ?? false,
   });
+  trail = trailWindow;
+  const savedPreferences = preferenceStore.current();
+  if (savedPreferences.neonTrailEnabled) {
+    trailOn = true;
+    trailWindow.setEnabled(true);
+  }
   tray = createTray({
     onShow: () => overlay?.show(),
     onHide: () => overlay?.hide(),
@@ -369,15 +389,18 @@ void app.whenReady().then(async () => {
     onOpenChat: () => chat?.open(),
     onToggleRecoveryCapture: (enabled) => overlay?.setRecoveryCapture(enabled),
     isRecoveryCapture: () => overlay?.isRecoveryCapture() ?? false,
-    devMovement,
+    isWandering: () => wander.enabled,
+    isTrail: () => trailOn,
+    isStartAwake: () => preferenceStore.current().startAwake,
+    onStartAwake: (enabled) => {
+      preferenceStore.update({ startAwake: enabled });
+    },
+    devMovement: dev,
     devMarker: dev,
     onMoveTest: () => {
       runMoveTest('tray');
     },
     onMove: (direction) => {
-      if (!devMovement) {
-        return;
-      }
       const activity = chat?.activity();
       const block = travelBlock({
         chatOpen: activity?.open ?? false,
@@ -400,7 +423,7 @@ void app.whenReady().then(async () => {
       overlay?.moveBy(direction);
     },
     onWander: (enabled) => {
-      if (!devMovement || !overlay) {
+      if (!overlay) {
         return;
       }
       const view = overlay.wanderView();
@@ -416,11 +439,14 @@ void app.whenReady().then(async () => {
       applyWander(enableWander(wander, Date.now(), view));
     },
     onTrail: (action) => {
-      if (!devMovement) {
-        return;
+      if (action === 'reset' || action === 'marker') {
+        if (!dev) {
+          return;
+        }
       }
       if (action === 'disable') {
-        trail?.setEnabled(false);
+        trailOn = preferenceStore.update({ neonTrailEnabled: false }).neonTrailEnabled;
+        trail?.setEnabled(trailOn);
         return;
       }
       if (action === 'reset') {
@@ -431,7 +457,8 @@ void app.whenReady().then(async () => {
         trail?.showMarker();
         return;
       }
-      trail?.setEnabled(true);
+      trailOn = preferenceStore.update({ neonTrailEnabled: true }).neonTrailEnabled;
+      trail?.setEnabled(trailOn);
     },
     onQuit: () => { void shutdown(); },
   });

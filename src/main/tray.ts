@@ -1,5 +1,10 @@
-import path from 'node:path';
 import { Menu, Tray, nativeImage, type MenuItemConstructorOptions, type NativeImage } from 'electron';
+import { resolveTrayIcon } from '../shared/packagedLayout.js';
+
+export interface CompanionTray {
+  destroy: () => void;
+  refresh: () => void;
+}
 
 export function createTray(options: {
   onShow: () => void;
@@ -9,6 +14,10 @@ export function createTray(options: {
   onOpenChat: () => void;
   onToggleRecoveryCapture: (enabled: boolean) => void;
   isRecoveryCapture: () => boolean;
+  isWandering: () => boolean;
+  isTrail: () => boolean;
+  isStartAwake: () => boolean;
+  onStartAwake?: (enabled: boolean) => void;
   devMovement?: boolean;
   devMarker?: boolean;
   onMove?: (direction: 'left' | 'right' | 'up' | 'down' | 'home' | 'stop') => void;
@@ -16,7 +25,7 @@ export function createTray(options: {
   onWander?: (enabled: boolean) => void;
   onTrail?: (action: 'enable' | 'disable' | 'reset' | 'marker') => void;
   onQuit: () => void;
-}): Tray {
+}): CompanionTray {
   const tray = new Tray(loadTrayImage());
   tray.setToolTip('Desktop Companion');
 
@@ -34,6 +43,50 @@ export function createTray(options: {
       { label: 'Open Chat', click: options.onOpenChat },
       { type: 'separator' },
       {
+        label: 'Movement',
+        submenu: [
+          { label: 'Move Up', click: () => options.onMove?.('up') },
+          { label: 'Move Down', click: () => options.onMove?.('down') },
+          { label: 'Move Left', click: () => options.onMove?.('left') },
+          { label: 'Move Right', click: () => options.onMove?.('right') },
+          { label: 'Return Home', click: () => options.onMove?.('home') },
+          { label: 'Stop movement', click: () => options.onMove?.('stop') },
+        ],
+      },
+      {
+        label: 'Wandering',
+        type: 'checkbox',
+        checked: options.isWandering(),
+        click: (item) => {
+          options.onWander?.(Boolean(item.checked));
+          refresh();
+        },
+      },
+      {
+        label: 'Neon Trail',
+        type: 'checkbox',
+        checked: options.isTrail(),
+        click: (item) => {
+          options.onTrail?.(item.checked ? 'enable' : 'disable');
+          refresh();
+        },
+      },
+      {
+        label: 'Preferences',
+        submenu: [
+          {
+            label: 'Start Awake',
+            type: 'checkbox',
+            checked: options.isStartAwake(),
+            click: (item) => {
+              options.onStartAwake?.(Boolean(item.checked));
+              refresh();
+            },
+          },
+        ],
+      },
+      { type: 'separator' },
+      {
         label: 'Recovery: capture whole window',
         type: 'checkbox',
         checked: options.isRecoveryCapture(),
@@ -42,40 +95,31 @@ export function createTray(options: {
           refresh();
         },
       },
-      { type: 'separator' },
       ...(options.devMovement
         ? [
-            { label: 'Move left', click: () => options.onMove?.('left') },
-            { label: 'Move right', click: () => options.onMove?.('right') },
-            { label: 'Move up', click: () => options.onMove?.('up') },
-            { label: 'Move down', click: () => options.onMove?.('down') },
-            { label: 'Return home', click: () => options.onMove?.('home') },
-            { label: 'Stop movement', click: () => options.onMove?.('stop') },
+            { type: 'separator' as const },
             { label: 'Test window move', click: () => options.onMoveTest?.() },
-            { type: 'separator' as const },
-            { label: 'Enable Wandering', click: () => options.onWander?.(true) },
-            { label: 'Disable Wandering', click: () => options.onWander?.(false) },
-            { type: 'separator' as const },
-            { label: 'Enable Neon Trail', click: () => options.onTrail?.('enable') },
-            { label: 'Disable Neon Trail', click: () => options.onTrail?.('disable') },
             { label: 'Reset Trail', click: () => options.onTrail?.('reset') },
             ...(options.devMarker
               ? [{ label: 'Show Trail Marker', click: () => options.onTrail?.('marker') }]
               : []),
-            { type: 'separator' as const },
           ]
         : []),
+      { type: 'separator' },
       { label: 'Quit', click: options.onQuit },
     ];
     return Menu.buildFromTemplate(template);
   };
 
   refresh();
-  return tray;
+  return {
+    destroy: () => tray.destroy(),
+    refresh,
+  };
 }
 
 function loadTrayImage(): NativeImage {
-  const iconPath = path.join(__dirname, '../../assets/tray.png');
+  const iconPath = resolveTrayIcon(__dirname);
   const image = nativeImage.createFromPath(iconPath);
   if (image.isEmpty()) {
     throw new Error(`Tray icon missing or unreadable: ${iconPath}`);

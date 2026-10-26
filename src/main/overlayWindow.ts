@@ -35,6 +35,7 @@ import {
   type TravelState,
 } from '../shared/desktopMovement.js';
 import type { TrailSample } from '../shared/neonTrail.js';
+import { companionPreload, companionRendererRoot } from '../shared/packagedLayout.js';
 import { WANDER_EXPLORE_MS, WANDER_HOP_MAX_DIP, WANDER_HOP_MIN_DIP, type WanderSnapshot } from '../shared/wander.js';
 import { isRobotRendererUrl } from '../shared/trustedUrl.js';
 
@@ -643,11 +644,11 @@ export function createOverlayWindow(options: {
 }
 
 export function preloadPath(): string {
-  return path.join(__dirname, '../preload/preload.js');
+  return companionPreload(__dirname);
 }
 
 export function rendererRoot(): string {
-  return path.join(__dirname, '../renderer');
+  return companionRendererRoot(__dirname);
 }
 
 function currentPlacement() {

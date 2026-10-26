@@ -8,6 +8,7 @@ Thumbs.db
 qwen-key.bin
 provider-settings.json
 tts-settings.json
+user-preferences.json
 .env
 .env.*
 !.env.example
@@ -17,3 +18,4 @@ coverage/
 *.wav
 *.m4a
 *.mp3
+release/
