@@ -7,7 +7,7 @@ import {
   SRGBColorSpace,
   WebGLRenderer,
 } from 'three';
-import { ORB_DIAMETER_DIP } from '../../shared/clickThrough';
+import { COMPANION_LAYOUT } from '../../shared/companionLayout';
 import type { RobotGesture } from '../../shared/gesturePose';
 import type { CursorSample } from '../../shared/ipc';
 import {
@@ -87,7 +87,7 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
     camera.aspect = width / height;
     camera.position.z = cameraDistanceForBody({
       viewportHeightPx: height,
-      bodyDiameterPx: ORB_DIAMETER_DIP,
+      bodyDiameterPx: COMPANION_LAYOUT.cameraFramingDip.bodyDiameter,
       fovDegrees: CAMERA_FOV_DEGREES,
       bodyRadiusWorld: BODY_RADIUS_WORLD,
     });
@@ -100,6 +100,11 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
   const frame = (): void => {
     if (disposed || document.hidden) {
       return;
+    }
+    // Windows can change DPR while keeping the DIP bounds unchanged. Reuse the
+    // existing frame callback; resize only when the capped ratio changes.
+    if (renderer.getPixelRatio() !== Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO)) {
+      resize();
     }
     const now = performance.now();
     const next = director.step(now);
@@ -166,6 +171,9 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
     avatar.apply(opening.pose, now);
     renderer.render(scene, camera);
     const gl = renderer.getContext();
+    if (gl.getError() !== gl.NO_ERROR) {
+      throw new Error('webgl-first-frame-error');
+    }
     const debug = gl.getExtension('WEBGL_debug_renderer_info');
     const gpu = debug ? String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)) : 'unavailable';
     const info = renderer.info.render;

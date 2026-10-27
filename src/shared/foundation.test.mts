@@ -12,26 +12,26 @@ import { isTrustedRendererUrl } from './trustedUrl.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-test('places a 300x400 window inside the primary work area', () => {
+test('places the compact 216x224 window inside the primary work area', () => {
   const placed = placeOverlay({ x: 0, y: 0, width: 1920, height: 1040 });
   assert.equal(placed.width, OVERLAY_WIDTH_DIP);
   assert.equal(placed.height, OVERLAY_HEIGHT_DIP);
-  assert.equal(placed.x, 1604);
-  assert.equal(placed.y, 624);
+  assert.equal(placed.x, 1688);
+  assert.equal(placed.y, 800);
 });
 
 test('keeps placement on a display with negative coordinates', () => {
   const workArea = { x: -1920, y: 0, width: 1920, height: 1080 };
   const placed = placeOverlay(workArea);
-  assert.equal(placed.x, -316);
-  assert.equal(placed.y, 664);
+  assert.equal(placed.x, -232);
+  assert.equal(placed.y, 840);
   assert.ok(placed.x >= workArea.x);
   assert.ok(placed.y >= workArea.y);
   assert.ok(placed.x + placed.width <= workArea.x + workArea.width);
   assert.ok(placed.y + placed.height <= workArea.y + workArea.height);
 });
 
-test('clamps the overlay when the work area is smaller than 300x400', () => {
+test('clamps the overlay when the work area is smaller than 216x224', () => {
   const placed = placeOverlay({ x: 10, y: 20, width: 200, height: 150 });
   assert.deepEqual(placed, { x: 10, y: 20, width: 200, height: 150 });
 });

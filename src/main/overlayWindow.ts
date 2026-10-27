@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { BrowserWindow, ipcMain, screen, type IpcMainEvent } from 'electron';
+import { BrowserWindow, ipcMain, screen, systemPreferences, type IpcMainEvent } from 'electron';
+import { FOLLOW, enableFollow, followInputSuppressed, holdFollow, initialFollow, observeFollowCursor, planFollow, stepFollow, type FollowView } from '../shared/cursorFollow.js';
 import {
   CURSOR_POLL_MS,
   INITIAL_POINTER_STATE,
@@ -40,6 +41,8 @@ import { WANDER_EXPLORE_MS, WANDER_HOP_MAX_DIP, WANDER_HOP_MIN_DIP, type WanderS
 import { isRobotRendererUrl } from '../shared/trustedUrl.js';
 
 export interface OverlayController {
+  setFollowEnabled: (enabled: boolean) => void;
+  isFollowing: () => boolean;
   show: () => void;
   hide: () => void;
   wake: (source?: 'tray' | 'chat') => void;
@@ -61,8 +64,10 @@ export interface OverlayController {
 
 export function createOverlayWindow(options: {
   dev: boolean;
+  verifyWebGL?: boolean;
   preloadPath: string;
   onFirstFrame: () => void;
+  onFollowChanged?: () => void;
   getTravelBlock?: () => { chatOpen: boolean; listening: boolean; speaking: boolean; generating: boolean };
   onTrail?: (sample: TrailSample) => void;
   onTravelSettled?: () => void;
@@ -91,11 +96,12 @@ export function createOverlayWindow(options: {
   // Click-through until a fresh sample says the pointer is on the body proxy.
   win.setIgnoreMouseEvents(true);
   const onConsole = (event: { message: string }): void => {
-    if (event.message.startsWith('desktop-companion: probe')) {
+    if ((options.dev && event.message.startsWith('desktop-companion: probe')) ||
+        (options.verifyWebGL && event.message.startsWith('desktop-companion: webgl'))) {
       console.log(event.message);
     }
   };
-  if (options.dev) {
+  if (options.dev || options.verifyWebGL) {
     win.webContents.on('console-message', onConsole);
   }
 
@@ -120,6 +126,10 @@ export function createOverlayWindow(options: {
   let lastPointerLocal = '';
   let lastPointerLogAt = 0;
   let robotPhase = 'SLEEPING';
+  let follow = initialFollow();
+  let followSleepRequested = false;
+  let animationSettingsAt = -Infinity;
+  let reducedMotion = true;
 
   const show = (): void => {
     if (destroyed || win.isDestroyed()) {
@@ -146,6 +156,7 @@ export function createOverlayWindow(options: {
     if (destroyed || win.isDestroyed()) {
       return;
     }
+    setFollowEnabled(false);
     const current = win.getBounds();
     const matching = workAreaDip(screen.getDisplayMatching(current));
     const fallback = screen.getPrimaryDisplay().workArea;
@@ -195,6 +206,8 @@ export function createOverlayWindow(options: {
       return;
     }
     robotPhase = payload;
+    if (payload === 'WAKING') followSleepRequested = false;
+    if (payload !== 'IDLE' && payload !== 'TRACKING') stopFollowMotion('phase');
     console.log(`desktop-companion: behavior ${payload}`);
     options.onRobotPhase?.(payload);
     if (payload === 'SLEEPING' || payload === 'RETURNING_TO_SLEEP') {
@@ -219,6 +232,7 @@ export function createOverlayWindow(options: {
 
   win.on('show', startPolling);
   win.on('hide', () => {
+    stopFollowMotion('hidden');
     stopPolling();
     applyMode('passthrough', 'hidden');
   });
@@ -234,10 +248,13 @@ export function createOverlayWindow(options: {
   void win.loadURL(pageUrl);
 
   return {
+    setFollowEnabled,
+    isFollowing: () => follow.enabled,
     show,
     hide,
     setRecoveryCapture(enabled: boolean): void {
       recoveryCapture = enabled;
+      if (enabled) stopFollowMotion('recovery');
       if (!enabled) {
         pointerState = INITIAL_POINTER_STATE;
       }
@@ -299,6 +316,7 @@ export function createOverlayWindow(options: {
       commandTravel('home');
     },
     stopMovement(): void {
+      setFollowEnabled(false);
       haltTravel('fade');
     },
     moveTop(): void {
@@ -333,6 +351,7 @@ export function createOverlayWindow(options: {
         return;
       }
       destroyed = true;
+      follow = initialFollow();
       stopPolling();
       haltTravel('clear');
       ipcMain.removeListener(IpcChannels.frameReady, onFrameReady);
@@ -368,13 +387,15 @@ export function createOverlayWindow(options: {
     if (destroyed || win.isDestroyed()) {
       return null;
     }
-    return workAreaDip(screen.getDisplayMatching(win.getBounds()));
+    try { return workAreaDip(screen.getDisplayMatching(win.getBounds())); }
+    catch { return null; }
   }
 
   function commandTravel(command: TravelDirection | 'home', distanceDip?: number): void {
     if (destroyed || win.isDestroyed()) {
       return;
     }
+    setFollowEnabled(false);
     const area = readWorkArea();
     const gate = options.getTravelBlock?.() ?? { chatOpen: false, listening: false, speaking: false, generating: false };
     const block = travelBlock(gate);
@@ -407,6 +428,7 @@ export function createOverlayWindow(options: {
   }
 
   function haltTravel(intent: 'fade' | 'clear'): void {
+    stopFollowMotion(intent === 'clear' ? 'hidden' : 'stopped');
     travel = stopTravel(travel);
     if (travelTimer) {
       clearInterval(travelTimer);
@@ -429,7 +451,7 @@ export function createOverlayWindow(options: {
   }
 
   function ensureTravelTimer(): void {
-    if (travel.phase === 'idle') {
+    if (travel.phase === 'idle' && follow.phase !== 'moving') {
       haltTravel('fade');
       return;
     }
@@ -442,6 +464,10 @@ export function createOverlayWindow(options: {
   function tickTravel(): void {
     if (destroyed || win.isDestroyed()) {
       haltTravel('clear');
+      return;
+    }
+    if (follow.enabled && travel.phase === 'idle') {
+      tickFollow();
       return;
     }
     const area = readWorkArea();
@@ -463,15 +489,7 @@ export function createOverlayWindow(options: {
     }
     const nextX = Math.round(travel.x);
     const nextY = Math.round(travel.y);
-    if (nextX !== live.x || nextY !== live.y) {
-      win.setBounds({ x: nextX, y: nextY, width: live.width, height: live.height });
-      if (!boundsNoted) {
-        boundsNoted = true;
-        if (options.dev) {
-          console.log(`desktop-companion: travel bounds ${live.x},${live.y} -> ${nextX},${nextY}`);
-        }
-      }
-    }
+    applyWindowPosition(nextX, nextY, live);
     publishTrail({
       window: { x: nextX, y: nextY, width: live.width, height: live.height },
       workArea: area,
@@ -534,8 +552,27 @@ export function createOverlayWindow(options: {
     }
     const now = Date.now();
     const visible = win.isVisible();
-    const cursor = screen.getCursorScreenPoint();
+    let cursor: { x: number; y: number };
+    try { cursor = screen.getCursorScreenPoint(); }
+    catch {
+      stopFollowMotion('cursor-unavailable');
+      applyMode('passthrough', 'cursor-unavailable');
+      return;
+    }
     const windowBounds = win.getBounds();
+    if (follow.enabled) {
+      const at = performance.now();
+      if (at - animationSettingsAt >= FOLLOW.decisionMs) {
+        animationSettingsAt = at;
+        try { reducedMotion = systemPreferences.getAnimationSettings().prefersReducedMotion; }
+        catch { reducedMotion = true; }
+      }
+      const before = follow.phase;
+      follow = observeFollowCursor(follow, { x: cursor.x, y: cursor.y, at });
+      follow = planFollow(follow, followView(windowBounds), at);
+      finishFollowStep(before);
+    }
+    const inputSuppressed = followInputSuppressed(follow, performance.now());
     const observation = observeCircle({
       cursor,
       windowOrigin: { x: windowBounds.x, y: windowBounds.y },
@@ -561,7 +598,7 @@ export function createOverlayWindow(options: {
       visible &&
       observation.cursorInsideWindow &&
       observation.distanceDip != null &&
-      observation.distanceDip <= observation.captureRadiusDip,
+      (observation.distanceDip <= observation.captureRadiusDip || observation.onArm === true),
     );
     if (onBody !== pointerOnBody) {
       pointerOnBody = onBody;
@@ -575,8 +612,10 @@ export function createOverlayWindow(options: {
         });
       }
     }
-    applyMode(pointed.mode, pointed.reason);
-    logPointerSample(visible ? observation : null, cursor, windowBounds, pointed.mode, pointed.reason, now);
+    const effective = inputSuppressed && !recoveryCapture
+      ? { mode: 'passthrough' as const, reason: 'follow-motion' } : pointed;
+    applyMode(effective.mode, effective.reason);
+    logPointerSample(visible ? observation : null, cursor, windowBounds, effective.mode, effective.reason, now);
     if (visible && !win.webContents.isDestroyed()) {
       win.webContents.send(IpcChannels.cursorSample, {
         x: cursor.x,
@@ -586,6 +625,7 @@ export function createOverlayWindow(options: {
         width: windowBounds.width,
         height: windowBounds.height,
         at: now,
+        inputSuppressed,
       });
     }
   }
@@ -593,6 +633,12 @@ export function createOverlayWindow(options: {
   function sendBehavior(command: 'wake' | 'sleep', source: 'tray' | 'chat' = 'tray'): void {
     if (destroyed || win.isDestroyed()) {
       return;
+    }
+    if (command === 'sleep') {
+      followSleepRequested = true;
+      stopFollowMotion('sleep-request');
+    } else {
+      followSleepRequested = false;
     }
     win.webContents.send(IpcChannels.behavior, command);
     console.log(`desktop-companion: ${source}-${command}`);
@@ -612,7 +658,7 @@ export function createOverlayWindow(options: {
     const onTarget =
       inside &&
       observation?.distanceDip != null &&
-      observation.distanceDip <= observation.captureRadiusDip;
+      (observation.distanceDip <= observation.captureRadiusDip || observation.onArm === true);
     const ignore = mode === 'passthrough';
     const signature = `${inside}|${onTarget}|${mode}|${ignore}|${reason}`;
     const local = `${localX},${localY}`;
@@ -640,6 +686,83 @@ export function createOverlayWindow(options: {
     // No forward option. Cursor polling does not need forwarded mouse moves.
     win.setIgnoreMouseEvents(mode === 'passthrough');
     console.log(`desktop-companion: pointer-mode ${mode} (${reason})`);
+  }
+
+  function followView(live = win.getBounds()): FollowView {
+    let display: ReturnType<typeof screen.getDisplayMatching> | null = null;
+    try { display = screen.getDisplayMatching(live); } catch { /* unavailable display fails closed */ }
+    const area = workAreaDip(display);
+    const key = area && display ? `${display.id}:${display.scaleFactor}:${area.x}:${area.y}:${area.width}:${area.height}` : null;
+    return { window: live, workArea: area, displayKey: key,
+      // Conservatively protect the whole compact footprint, including arms and badge.
+      visualRadiusDip: Math.hypot(live.width / 2, live.height / 2),
+      visible: win.isVisible(), awake: !followSleepRequested && (robotPhase === 'IDLE' || robotPhase === 'TRACKING'),
+      blocked: travelBlock(options.getTravelBlock?.() ?? { chatOpen: false, listening: false, speaking: false, generating: false }) !== null,
+      recovery: recoveryCapture, reducedMotion, manual: travel.phase !== 'idle' };
+  }
+
+  function setFollowEnabled(enabled: boolean): void {
+    if (destroyed || win.isDestroyed() || !options.dev || enabled === follow.enabled) return;
+    const before = follow.phase;
+    const live = win.getBounds();
+    if (enabled) {
+      // Enabling explicitly replaces any fixed-endpoint move; main disables wander first.
+      haltTravel('fade');
+      follow = enableFollow(live, followView(live).displayKey, performance.now());
+    } else {
+      follow = initialFollow();
+    }
+    finishFollowStep(before);
+    options.onFollowChanged?.();
+    sampleAndApply();
+  }
+
+  function stopFollowMotion(reason: string): void {
+    if (!follow.enabled) return;
+    const before = follow.phase;
+    follow = holdFollow(follow, performance.now(), reason);
+    finishFollowStep(before);
+  }
+
+  function finishFollowStep(before: string): void {
+    if (follow.phase === 'moving') {
+      ensureTravelTimer();
+    } else if (before === 'moving' && travel.phase === 'idle') {
+      if (travelTimer) { clearInterval(travelTimer); travelTimer = null; }
+      announceTravel(false);
+      const live = win.getBounds();
+      travel = syncTravelBounds(travel, live);
+      publishTrail({ window: live, workArea: readWorkArea(), travelPhase: 'idle', asleep: robotAsleep(),
+        chatOpen: options.getTravelBlock?.().chatOpen ?? false, forceClear: false });
+      notifySettled();
+    }
+  }
+
+  function tickFollow(): void {
+    const before = follow.phase;
+    const live = win.getBounds();
+    const view = followView(live);
+    const at = performance.now();
+    follow = stepFollow(planFollow(follow, view, at), view, at);
+    const nextX = Math.round(follow.x), nextY = Math.round(follow.y);
+    if (follow.phase === 'moving') {
+      applyWindowPosition(nextX, nextY, live);
+      announceTravel(true);
+      publishTrail({ window: { ...live, x: nextX, y: nextY }, workArea: view.workArea,
+        travelPhase: 'moving', asleep: robotAsleep(), chatOpen: view.blocked, forceClear: false });
+    }
+    finishFollowStep(before);
+  }
+
+  /** Both mutually exclusive modes share this actuator and the same travel timer. */
+  function applyWindowPosition(nextX: number, nextY: number, live: { x: number; y: number; width: number; height: number }): void {
+    if (nextX !== live.x || nextY !== live.y) {
+      win.setBounds({ x: nextX, y: nextY, width: live.width, height: live.height });
+      if (!boundsNoted) {
+        boundsNoted = true;
+        if (options.dev) console.log(`desktop-companion: travel bounds ${live.x},${live.y} -> ${nextX},${nextY}`);
+      }
+    }
   }
 }
 

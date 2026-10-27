@@ -5,9 +5,7 @@
  */
 
 import type { TravelPhase } from './desktopMovement.js';
-
-/** Matches the 160 DIP body circle centered in the avatar window. */
-const BODY_RADIUS_DIP = 80;
+import { COMPANION_LAYOUT, type CompanionLayout } from './companionLayout.ts';
 
 export const TRAIL_MAX_PARTICLES = 32;
 export const TRAIL_SPACING_DIP = 16;
@@ -132,14 +130,14 @@ export function trailLocal(x: number, y: number, originX: number, originY: numbe
 }
 
 /** Point just outside the visible body, opposite the velocity. */
-export function trailingPoint(bounds: DipRect, velocityX: number, velocityY: number): DipPoint | null {
+export function trailingPoint(bounds: DipRect, velocityX: number, velocityY: number, layout: CompanionLayout = COMPANION_LAYOUT): DipPoint | null {
   const length = Math.hypot(velocityX, velocityY);
   if (length < 0.2) {
     return null;
   }
   const ux = velocityX / length;
   const uy = velocityY / length;
-  const distance = BODY_RADIUS_DIP + TRAIL_EDGE_GAP_DIP;
+  const distance = layout.trailAnchorDip.bodyRadius + TRAIL_EDGE_GAP_DIP;
   return {
     x: bounds.x + bounds.width / 2 - ux * distance,
     y: bounds.y + bounds.height / 2 - uy * distance,

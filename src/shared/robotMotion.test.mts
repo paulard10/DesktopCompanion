@@ -46,7 +46,7 @@ test('a click pulse is a short symmetric scale and then rests', () => {
   assert.equal(clickPulseScale(100, 100 + 180), 1);
 });
 
-test('the body sphere is framed to the 160 DIP proxy and the rig stays inside the window', () => {
+test('the body sphere is framed to the 108 DIP proxy and the rig stays inside the window', () => {
   const distance = cameraDistanceForBody({
     viewportHeightPx: OVERLAY_HEIGHT_DIP,
     bodyDiameterPx: ORB_DIAMETER_DIP,

@@ -20,6 +20,8 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const windowOrigin = { x: 100, y: 50 };
+const centerX = OVERLAY_WIDTH_DIP / 2;
+const centerY = OVERLAY_HEIGHT_DIP / 2;
 
 function sample(localX: number, localY: number, sampleAt = 1_000): WindowSample {
   return {
@@ -50,17 +52,17 @@ function decideAt(
 }
 
 test('the hit target is the visible circle with no extra padding or exit hold', () => {
-  assert.equal(OVERLAY_WIDTH_DIP, 300);
-  assert.equal(OVERLAY_HEIGHT_DIP, 400);
-  assert.equal(ORB_DIAMETER_DIP, 160);
-  assert.equal(ORB_RADIUS_DIP, 80);
+  assert.equal(OVERLAY_WIDTH_DIP, 216);
+  assert.equal(OVERLAY_HEIGHT_DIP, 224);
+  assert.equal(ORB_DIAMETER_DIP, 108);
+  assert.equal(ORB_RADIUS_DIP, 54);
   assert.equal(HIT_SLACK_DIP, 0);
   assert.equal(LEAVE_HOLD_MS, 0);
 });
 
 test('converts desktop DIP into window-local DIP, including a negative monitor', () => {
   const observation = observeCircle({
-    cursor: { x: -1770, y: 200 },
+    cursor: { x: -1920 + centerX, y: centerY },
     windowOrigin: { x: -1920, y: 0 },
     windowWidth: OVERLAY_WIDTH_DIP,
     windowHeight: OVERLAY_HEIGHT_DIP,
@@ -71,23 +73,23 @@ test('converts desktop DIP into window-local DIP, including a negative monitor',
 });
 
 test('the circle center and visual edge are interactive', () => {
-  const center = decideAt(150, 200);
+  const center = decideAt(centerX, centerY);
   assert.equal(center.mode, 'interactive');
   assert.equal(center.reason, 'inside-target');
 
-  const edge = decideAt(150 + ORB_RADIUS_DIP, 200);
+  const edge = decideAt(centerX, centerY - ORB_RADIUS_DIP);
   assert.equal(edge.mode, 'interactive');
 });
 
 test('one DIP inside the visible circle captures and one DIP outside does not', () => {
-  const insideEdge = decideAt(150 + ORB_RADIUS_DIP - 1, 200);
+  const insideEdge = decideAt(centerX, centerY - ORB_RADIUS_DIP + 1);
   assert.equal(insideEdge.mode, 'interactive');
   assert.equal(insideEdge.reason, 'inside-target');
 
-  const onEdge = decideAt(150 + ORB_RADIUS_DIP, 200);
+  const onEdge = decideAt(centerX, centerY - ORB_RADIUS_DIP);
   assert.equal(onEdge.mode, 'interactive');
 
-  const outsideEdge = decideAt(150 + ORB_RADIUS_DIP + 1, 200, insideEdge.state, 1_000);
+  const outsideEdge = decideAt(centerX, centerY - ORB_RADIUS_DIP - 1, insideEdge.state, 1_000);
   assert.equal(outsideEdge.mode, 'passthrough');
   assert.equal(outsideEdge.reason, 'left-target');
 });
@@ -106,7 +108,7 @@ test('every window corner is outside the circle', () => {
 });
 
 test('all four corners pass through immediately after the pointer was on the circle', () => {
-  const inside = decideAt(150, 200, INITIAL_POINTER_STATE, 1_000);
+  const inside = decideAt(centerX, centerY, INITIAL_POINTER_STATE, 1_000);
   assert.equal(inside.mode, 'interactive');
   const corners = [
     [0, 0],
@@ -122,31 +124,31 @@ test('all four corners pass through immediately after the pointer was on the cir
 });
 
 test('moving from the circle to a transparent point inside the window is passthrough', () => {
-  const inside = decideAt(150, 200, INITIAL_POINTER_STATE, 1_000);
-  const beside = decideAt(12, 200, inside.state, 1_000);
+  const inside = decideAt(centerX, centerY, INITIAL_POINTER_STATE, 1_000);
+  const beside = decideAt(4, centerY, inside.state, 1_000);
   assert.equal(beside.mode, 'passthrough');
   assert.equal(beside.reason, 'left-target');
-  const stayed = decideAt(12, 300, beside.state, 1_016);
+  const stayed = decideAt(4, centerY + 30, beside.state, 1_016);
   assert.equal(stayed.mode, 'passthrough');
   assert.equal(stayed.reason, 'outside-target');
 });
 
 test('leaving the circle and re-entering on the next sample captures again', () => {
-  const inside = decideAt(150, 200, INITIAL_POINTER_STATE, 1_000);
+  const inside = decideAt(centerX, centerY, INITIAL_POINTER_STATE, 1_000);
   const left = decideAt(0, 0, inside.state, 1_016);
   assert.equal(left.mode, 'passthrough');
   assert.equal(left.state.leavePendingSince, null);
 
-  const returned = decideAt(150, 200, left.state, 1_032);
+  const returned = decideAt(centerX, centerY, left.state, 1_032);
   assert.equal(returned.mode, 'interactive');
   assert.equal(returned.reason, 'inside-target');
   assert.equal(returned.state.leavePendingSince, null);
 });
 
 test('a cursor outside the window passes through immediately', () => {
-  const inside = decideAt(150, 200);
+  const inside = decideAt(centerX, centerY);
   const observation = observeCircle({
-    cursor: { x: windowOrigin.x - 2, y: windowOrigin.y + 200 },
+    cursor: { x: windowOrigin.x - 2, y: windowOrigin.y + centerY },
     windowOrigin,
     windowWidth: OVERLAY_WIDTH_DIP,
     windowHeight: OVERLAY_HEIGHT_DIP,
@@ -163,7 +165,7 @@ test('a cursor outside the window passes through immediately', () => {
 });
 
 test('a stale or missing sample defaults to passthrough', () => {
-  const freshHit = observeAt(150, 200, 1_000);
+  const freshHit = observeAt(centerX, centerY, 1_000);
   const stale = decidePointerMode(freshHit, INITIAL_POINTER_STATE, {
     visible: true,
     recoveryCapture: false,
@@ -184,7 +186,7 @@ test('a stale or missing sample defaults to passthrough', () => {
 test('passthrough does not stick after the pointer returns to the circle', () => {
   const outside = decideAt(0, 0);
   assert.equal(outside.mode, 'passthrough');
-  const back = decideAt(150, 200, outside.state, 2_000);
+  const back = decideAt(centerX, centerY, outside.state, 2_000);
   assert.equal(back.mode, 'interactive');
 });
 
@@ -236,7 +238,7 @@ test('recovery captures the window, and hiding wins over recovery', () => {
   assert.equal(hidden.reason, 'hidden');
 });
 
-test('the body proxy stays 160 DIP and the page does not paint a circle', () => {
+test('the body proxy is 108 DIP and the page does not paint a circle', () => {
   const css = readFileSync(path.join(here, '../renderer/styles.css'), 'utf8');
   const html = readFileSync(path.join(here, '../renderer/index.html'), 'utf8');
   const renderer = readFileSync(path.join(here, '../renderer/main.ts'), 'utf8');
@@ -245,7 +247,7 @@ test('the body proxy stays 160 DIP and the page does not paint a circle', () => 
   assert.equal(css.includes('#39ff14'), false);
   assert.equal(html.includes('id="orb"'), false);
   assert.match(html, /<canvas id="view"/);
-  assert.match(scene, /ORB_DIAMETER_DIP/);
+  assert.match(scene, /bodyDiameterPx:\s*COMPANION_LAYOUT\.cameraFramingDip\.bodyDiameter/);
   assert.equal(preload.includes('setIgnoreMouseEvents'), false);
   assert.equal(preload.includes('overlay:circle-click'), true);
   assert.equal(renderer.includes('setIgnoreMouseEvents'), false);

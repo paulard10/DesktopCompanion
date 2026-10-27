@@ -103,7 +103,7 @@ test('the trail sits behind the body for every direction', () => {
   const down = trailingPoint(bounds, 0, 20);
   const up = trailingPoint(bounds, 0, -20);
   assert.ok(right && left && down && up);
-  assert.equal(right.x, centerX - 88);
+  assert.equal(right.x, centerX - 62);
   assert.equal(right.y, centerY);
   assert.ok(right.x < centerX && right.y === centerY);
   assert.ok(left.x > centerX && left.y === centerY);

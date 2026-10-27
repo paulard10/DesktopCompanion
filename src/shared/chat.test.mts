@@ -36,6 +36,7 @@ import {
 import { gestureOffset, readGesture } from './gesturePose.ts';
 import { OVERLAY_HEIGHT_DIP, OVERLAY_WIDTH_DIP, placeOverlay } from './placement.ts';
 import { isChatRendererUrl, isRobotRendererUrl } from './trustedUrl.ts';
+import { applyChatBadgeLayout } from '../renderer/chatBadgeLayout.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -98,11 +99,11 @@ test('the chat trigger is outside the body circle and misses every corner', () =
   ]) {
     assert.equal(chatTriggerHit(x, y), false);
   }
-  const triggerCss = readFileSync(path.join(here, '../renderer/styles.css'), 'utf8');
-  assert.match(triggerCss, /left:\s*244px/);
-  assert.match(triggerCss, /top:\s*314px/);
-  assert.equal(CHAT_TRIGGER_CENTER_X - CHAT_TRIGGER_RADIUS_DIP, 244);
-  assert.equal(CHAT_TRIGGER_CENTER_Y - CHAT_TRIGGER_RADIUS_DIP, 314);
+  const triggerStyle = { left: '', top: '', width: '', height: '' };
+  applyChatBadgeLayout(triggerStyle);
+  assert.deepEqual(triggerStyle, { left: '172px', top: '180px', width: '36px', height: '36px' });
+  assert.equal(CHAT_TRIGGER_CENTER_X - CHAT_TRIGGER_RADIUS_DIP, 172);
+  assert.equal(CHAT_TRIGGER_CENTER_Y - CHAT_TRIGGER_RADIUS_DIP, 180);
   assert.equal(chatTriggerHit(CHAT_TRIGGER_CENTER_X, CHAT_TRIGGER_CENTER_Y), true);
   assert.equal(chatTriggerVisible('SLEEPING'), false);
   assert.equal(chatTriggerVisible('RETURNING_TO_SLEEP'), false);

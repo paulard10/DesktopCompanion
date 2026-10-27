@@ -143,6 +143,7 @@ interface CursorSamplePayload {
   width: number;
   height: number;
   at: number;
+  inputSuppressed?: boolean;
 }
 
 function readCursorSample(value: unknown): CursorSamplePayload | null {
@@ -174,5 +175,6 @@ function readCursorSample(value: unknown): CursorSamplePayload | null {
   if (width <= 0 || height <= 0) {
     return null;
   }
-  return { x, y, originX, originY, width, height, at };
+  if (sample.inputSuppressed !== undefined && typeof sample.inputSuppressed !== 'boolean') return null;
+  return { x, y, originX, originY, width, height, at, inputSuppressed: sample.inputSuppressed === true };
 }

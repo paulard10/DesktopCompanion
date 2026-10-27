@@ -74,6 +74,8 @@ export interface CursorSample {
   width: number;
   height: number;
   at: number;
+  /** Main-owned temporary input suppression during experimental follow. */
+  inputSuppressed?: boolean;
 }
 
 export interface ChatLineMessage {

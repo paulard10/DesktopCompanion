@@ -1,19 +1,21 @@
+import { COMPANION_LAYOUT, type CompanionLayout } from './companionLayout.ts';
+
 /**
  * Diameter of the main-body click proxy, in DIP.
- * The renderer frames the robot body to this same circle. Arms and the
- * antenna may draw outside it and are not clickable in this milestone.
+ * The renderer frames the robot body to this same circle. Compact arms have
+ * separate trusted capsules. The antenna is outside the guaranteed hit target.
  */
-export const ORB_DIAMETER_DIP = 160;
+export const ORB_DIAMETER_DIP = COMPANION_LAYOUT.bodyProxyDip.diameter;
 export const ORB_RADIUS_DIP = ORB_DIAMETER_DIP / 2;
 
 /**
- * Invisible capture outside the painted circle. Kept at zero so transparent
- * pixels, including the four window corners, are not an extra hit target.
+ * Extra padding on the central body circle. Kept at zero; the arm envelopes
+ * are separate explicit shapes, and window corners are not an extra target.
  */
 export const HIT_SLACK_DIP = 0;
 
 /**
- * How long the window stays clickable after the pointer leaves the circle
+ * How long the window stays clickable after the pointer leaves the target
  * while still inside the overlay rectangle. Zero means the next sample
  * returns to passthrough. The poll interval is the only remaining delay.
  */
@@ -37,12 +39,13 @@ export interface OrbGeometry {
   captureRadius: number;
 }
 
-export function orbGeometry(windowWidth: number, windowHeight: number): OrbGeometry {
+export function orbGeometry(windowWidth: number, windowHeight: number, layout: CompanionLayout = COMPANION_LAYOUT): OrbGeometry {
+  const radius = layout.bodyProxyDip.diameter / 2;
   return {
     centerX: windowWidth / 2,
     centerY: windowHeight / 2,
-    radius: ORB_RADIUS_DIP,
-    captureRadius: ORB_RADIUS_DIP + HIT_SLACK_DIP,
+    radius,
+    captureRadius: radius + HIT_SLACK_DIP,
   };
 }
 
@@ -59,6 +62,18 @@ export function isInsideWindow(local: DipPoint, width: number, height: number): 
 
 export function distanceToOrb(local: DipPoint, geometry: OrbGeometry): number {
   return Math.hypot(local.x - geometry.centerX, local.y - geometry.centerY);
+}
+
+/** Fixed main-owned arm envelopes; no renderer-provided geometry or raycasts. */
+export function armProxyHit(local: DipPoint, width: number, height: number, layout: CompanionLayout = COMPANION_LAYOUT): boolean {
+  const arm = layout.armProxyDip;
+  if (!arm || !isInsideWindow(local, width, height)) return false;
+  const x = Math.abs(local.x - width / 2) - arm.fromX;
+  const y = local.y - height / 2 - arm.fromY;
+  const dx = arm.toX - arm.fromX;
+  const dy = arm.toY - arm.fromY;
+  const along = Math.max(0, Math.min(1, (x * dx + y * dy) / (dx * dx + dy * dy)));
+  return (x - along * dx) ** 2 + (y - along * dy) ** 2 <= arm.radius ** 2;
 }
 
 export type PointerMode = 'passthrough' | 'interactive';
@@ -86,6 +101,7 @@ export interface CircleObservation {
   distanceDip: number | null;
   captureRadiusDip: number;
   sampleAt: number;
+  onArm?: boolean;
 }
 
 export interface PointerDecisionState {
@@ -110,15 +126,16 @@ export interface PointerOptions {
   now: number;
 }
 
-export function observeCircle(sample: WindowSample): CircleObservation {
+export function observeCircle(sample: WindowSample, layout: CompanionLayout = COMPANION_LAYOUT): CircleObservation {
   const local = windowLocalPoint(sample.cursor, sample.windowOrigin);
-  const geometry = orbGeometry(sample.windowWidth, sample.windowHeight);
+  const geometry = orbGeometry(sample.windowWidth, sample.windowHeight, layout);
   const inside = isInsideWindow(local, sample.windowWidth, sample.windowHeight);
   return {
     cursorInsideWindow: inside,
     distanceDip: inside ? distanceToOrb(local, geometry) : null,
     captureRadiusDip: geometry.captureRadius,
     sampleAt: sample.sampleAt,
+    onArm: inside && armProxyHit(local, sample.windowWidth, sample.windowHeight, layout),
   };
 }
 
@@ -144,7 +161,7 @@ export function decidePointerMode(
     return decision('passthrough', 'outside-window', null);
   }
 
-  const onTarget = observation.distanceDip <= observation.captureRadiusDip;
+  const onTarget = observation.distanceDip <= observation.captureRadiusDip || observation.onArm === true;
   if (onTarget) {
     return decision('interactive', 'inside-target', null);
   }

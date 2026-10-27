@@ -13,6 +13,7 @@ import { createInstalledLoginStartup } from './windowsLoginStartup.js';
 import { APP_USER_MODEL_ID } from '../shared/windowsLoginStartup.js';
 import { createUserPreferencesStore, type UserPreferencesStore } from '../shared/userPreferences.js';
 import { MOVE_TEST_DIP, travelBlock } from '../shared/desktopMovement.js';
+import { COMPANION_LAYOUT } from '../shared/companionLayout.js';
 import {
   WANDER_EXPLORE_MS,
   createWanderState,
@@ -146,7 +147,7 @@ void app.whenReady().then(async () => {
   chat = await createChatController({
     dev,
     preloadPath: path.join(preloadPath(), '../chatPreload.js'),
-    getAnchor: () => overlay?.getBounds() ?? { x: 0, y: 0, width: 300, height: 400 },
+    getAnchor: () => overlay?.getBounds() ?? { x: 0, y: 0, ...COMPANION_LAYOUT.windowDip },
     getWorkArea: (anchor) => screen.getDisplayMatching(anchor).workArea,
     onActivity: () => overlay?.wake('chat'),
     onGesture: (gesture) => overlay?.gesture(gesture),
@@ -164,6 +165,8 @@ void app.whenReady().then(async () => {
 
   overlay = createOverlayWindow({
     dev,
+    verifyWebGL: smoke,
+    onFollowChanged: () => tray?.refresh(),
     preloadPath: preloadPath(),
     getTravelBlock: () => {
       const activity = chat?.activity();
@@ -319,7 +322,7 @@ void app.whenReady().then(async () => {
   };
 
   const runWander = (): void => {
-    if (wanderClosed || !wander.enabled || !overlay) {
+    if (wanderClosed || !wander.enabled || !overlay || overlay.isFollowing()) {
       return;
     }
     const view = overlay.wanderView();
@@ -408,6 +411,14 @@ void app.whenReady().then(async () => {
     },
     devMovement: dev,
     devMarker: dev,
+    isFollowing: () => overlay?.isFollowing() ?? false,
+    onFollow: (enabled) => {
+      if (!dev || !overlay) return;
+      if (enabled) {
+        applyWander(disableWander(wander, overlay.wanderView()?.travelPhase ?? 'idle'));
+      }
+      overlay.setFollowEnabled(enabled);
+    },
     onMoveTest: () => {
       runMoveTest('tray');
     },
@@ -446,6 +457,7 @@ void app.whenReady().then(async () => {
         applyWander(disableWander(wander, view.travelPhase));
         return;
       }
+      overlay.setFollowEnabled(false);
       console.log('desktop-companion: wander enabled');
       applyWander(enableWander(wander, Date.now(), view));
     },

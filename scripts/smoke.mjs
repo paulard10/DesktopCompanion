@@ -37,16 +37,20 @@ function finish(code) {
   const started = output.includes('desktop-companion: process-started');
   const preload = output.includes('desktop-companion: preload=m1.6');
   const ready = output.includes('desktop-companion: frame-ready');
+  const webgl = output.includes('desktop-companion: webgl ready');
+  const webglError = /desktop-companion: webgl-(?:unavailable|render-failed|context-lost)/.test(output);
   const credential = output.includes('desktop-companion: credential-self-check=ok');
   const quitting = output.includes('desktop-companion: quitting');
-  if (code !== 0 || secondInstance || !started || !preload || !ready || !credential || !quitting) {
+  if (code !== 0 || secondInstance || !started || !preload || !ready || !webgl || webglError || !credential || !quitting) {
     console.error(output);
     console.error(
-      `Smoke failed. exit=${code} second-instance=${secondInstance} started=${started} preload=${preload} frame-ready=${ready} credential=${credential} quitting=${quitting}`,
+      `Smoke failed. exit=${code} second-instance=${secondInstance} started=${started} preload=${preload} frame-ready=${ready} webgl=${webgl} webgl-error=${webglError} credential=${credential} quitting=${quitting}`,
     );
     process.exit(code === 0 ? 1 : code ?? 1);
   }
-  console.log('Smoke passed: new process, m1.6 preload, first frame, disposable credential check, clean exit.');
+  const webglLine = output.split(/\r?\n/).find(line => line.startsWith('desktop-companion: webgl ready'));
+  console.log(webglLine);
+  console.log('Smoke passed: new process, m1.6 preload, first WebGL frame, disposable credential check, clean exit.');
   process.exit(0);
 }
 

@@ -20,10 +20,6 @@ canvas {
 
 #chat-trigger {
   position: absolute;
-  left: 244px;
-  top: 314px;
-  width: 36px;
-  height: 36px;
   display: grid;
   place-items: center;
   padding: 0;

@@ -1,6 +1,8 @@
-export const OVERLAY_WIDTH_DIP = 300;
-export const OVERLAY_HEIGHT_DIP = 400;
-export const OVERLAY_MARGIN_DIP = 16;
+import { COMPANION_LAYOUT, type CompanionLayout } from './companionLayout.ts';
+
+export const OVERLAY_WIDTH_DIP = COMPANION_LAYOUT.windowDip.width;
+export const OVERLAY_HEIGHT_DIP = COMPANION_LAYOUT.windowDip.height;
+export const OVERLAY_MARGIN_DIP = COMPANION_LAYOUT.placementMarginDip;
 
 export interface DipRect {
   x: number;
@@ -9,9 +11,9 @@ export interface DipRect {
   height: number;
 }
 
-export function placeOverlay(workArea: DipRect, margin = OVERLAY_MARGIN_DIP): DipRect {
-  const width = clampSize(OVERLAY_WIDTH_DIP, workArea.width);
-  const height = clampSize(OVERLAY_HEIGHT_DIP, workArea.height);
+export function placeOverlay(workArea: DipRect, margin = OVERLAY_MARGIN_DIP, layout: CompanionLayout = COMPANION_LAYOUT): DipRect {
+  const width = clampSize(layout.windowDip.width, workArea.width);
+  const height = clampSize(layout.windowDip.height, workArea.height);
   const maxX = workArea.x + workArea.width - width;
   const maxY = workArea.y + workArea.height - height;
   return {

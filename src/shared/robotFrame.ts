@@ -1,8 +1,7 @@
 /**
  * Camera framing for the procedural robot.
- * The main-process click proxy is a 160 DIP circle. These numbers keep the
- * body sphere on that circle. The antenna and arms are allowed to extend
- * past it; they are not part of the click target.
+ * World-unit geometry is independent of the source-selected DIP layout.
+ * The scene's body projection and trusted input shapes share that layout.
  */
 
 export const BODY_RADIUS_WORLD = 1;

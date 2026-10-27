@@ -1,12 +1,14 @@
+import { COMPANION_LAYOUT } from './companionLayout.ts';
+
 /**
- * A small chat button in the overlay's lower right, outside the 160 DIP body
+ * A small chat button in the overlay's lower right, outside the central body
  * circle. It does not change that circle. The main process enables it only
  * while the robot is awake.
  */
 
-export const CHAT_TRIGGER_RADIUS_DIP = 18;
-export const CHAT_TRIGGER_CENTER_X = 262;
-export const CHAT_TRIGGER_CENTER_Y = 332;
+export const CHAT_TRIGGER_RADIUS_DIP = COMPANION_LAYOUT.chatBadgeDip.radius;
+export const CHAT_TRIGGER_CENTER_X = COMPANION_LAYOUT.chatBadgeDip.centerX;
+export const CHAT_TRIGGER_CENTER_Y = COMPANION_LAYOUT.chatBadgeDip.centerY;
 
 export function chatTriggerVisible(phase: string): boolean {
   return phase === 'WAKING' || phase === 'IDLE' || phase === 'TRACKING';
