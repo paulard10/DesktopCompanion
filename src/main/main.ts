@@ -9,6 +9,8 @@ import { installSecurityPolicy } from './security.js';
 import { createOverlayWindow, preloadPath, rendererRoot, type OverlayController } from './overlayWindow.js';
 import { createTrailWindow, type TrailController } from './trailWindow.js';
 import { createTray } from './tray.js';
+import { createInstalledLoginStartup } from './windowsLoginStartup.js';
+import { APP_USER_MODEL_ID } from '../shared/windowsLoginStartup.js';
 import { createUserPreferencesStore, type UserPreferencesStore } from '../shared/userPreferences.js';
 import { MOVE_TEST_DIP, travelBlock } from '../shared/desktopMovement.js';
 import {
@@ -123,7 +125,7 @@ void app.whenReady().then(async () => {
   preferences = preferenceStore;
 
   Menu.setApplicationMenu(null);
-  app.setAppUserModelId('com.desktopcompanion.shell');
+  app.setAppUserModelId(APP_USER_MODEL_ID);
   const microphoneGate = installSecurityPolicy(dev);
   registerAppProtocol(rendererRoot());
 
@@ -374,6 +376,7 @@ void app.whenReady().then(async () => {
     trailOn = true;
     trailWindow.setEnabled(true);
   }
+  const loginStartup = createInstalledLoginStartup(dev, smoke);
   tray = createTray({
     onShow: () => overlay?.show(),
     onHide: () => overlay?.hide(),
@@ -394,6 +397,14 @@ void app.whenReady().then(async () => {
     isStartAwake: () => preferenceStore.current().startAwake,
     onStartAwake: (enabled) => {
       preferenceStore.update({ startAwake: enabled });
+    },
+    startupAvailable: loginStartup.available(),
+    isStartWithWindows: () => loginStartup.checked(),
+    onStartWithWindows: (enabled) => {
+      const result = loginStartup.setEnabled(enabled);
+      if (!result.ok && result.reason !== 'unavailable') {
+        console.error(`desktop-companion: windows-login-startup ${result.reason}`);
+      }
     },
     devMovement: dev,
     devMarker: dev,

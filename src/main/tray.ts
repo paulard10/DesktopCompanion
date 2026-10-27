@@ -1,5 +1,6 @@
 import { Menu, Tray, nativeImage, type MenuItemConstructorOptions, type NativeImage } from 'electron';
 import { resolveTrayIcon } from '../shared/packagedLayout.js';
+import { loginStartupMenuItem } from '../shared/windowsLoginStartup.js';
 
 export interface CompanionTray {
   destroy: () => void;
@@ -18,6 +19,9 @@ export function createTray(options: {
   isTrail: () => boolean;
   isStartAwake: () => boolean;
   onStartAwake?: (enabled: boolean) => void;
+  startupAvailable: boolean;
+  isStartWithWindows: () => boolean;
+  onStartWithWindows?: (enabled: boolean) => void;
   devMovement?: boolean;
   devMarker?: boolean;
   onMove?: (direction: 'left' | 'right' | 'up' | 'down' | 'home' | 'stop') => void;
@@ -34,6 +38,10 @@ export function createTray(options: {
   };
 
   const buildMenu = (): Menu => {
+    const startup = loginStartupMenuItem(
+      options.startupAvailable,
+      options.startupAvailable ? options.isStartWithWindows() : false,
+    );
     const template: MenuItemConstructorOptions[] = [
       { label: 'Show', click: options.onShow },
       { label: 'Hide', click: options.onHide },
@@ -83,6 +91,19 @@ export function createTray(options: {
               refresh();
             },
           },
+          {
+            label: startup.label,
+            type: startup.type,
+            checked: startup.checked,
+            enabled: startup.enabled,
+            click: (item) => {
+              if (!startup.enabled) {
+                return;
+              }
+              options.onStartWithWindows?.(Boolean(item.checked));
+              refresh();
+            },
+          },
         ],
       },
       { type: 'separator' },
@@ -111,6 +132,12 @@ export function createTray(options: {
     return Menu.buildFromTemplate(template);
   };
 
+  tray.on('click', () => {
+    refresh();
+  });
+  tray.on('right-click', () => {
+    refresh();
+  });
   refresh();
   return {
     destroy: () => tray.destroy(),

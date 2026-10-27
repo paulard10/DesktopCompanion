@@ -76,11 +76,12 @@ test('the Windows package allowlist keeps secrets, Whisper, and research out of 
   assert.match(manifest, /"package:installer": "npm run build && electron-builder --win nsis --x64"/);
   assert.equal(manifest.includes('"productName"'), false);
   assert.match(manifest, /"name": "desktop-companion"/);
-  assert.match(manifest, /"version": "0\.1\.0"/);
+  assert.match(manifest, /"version": "0\.1\.1"/);
   const main = read('src/main/main.ts');
   assert.match(main, /user-preferences\.json/);
   assert.match(main, /app\.getPath\('userData'\)/);
-  assert.match(main, /com\.desktopcompanion\.shell/);
+  assert.match(main, /setAppUserModelId\(APP_USER_MODEL_ID\)/);
+  assert.match(read('src/shared/windowsLoginStartup.ts'), /com\.desktopcompanion\.shell/);
   assert.match(main, /requestSingleInstanceLock/);
   assert.match(main, /second-instance-exit/);
   assert.match(main, /let wander: WanderState = createWanderState\(\)/);
