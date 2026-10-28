@@ -46,6 +46,9 @@ import { DOCK, arrived, dockingGeometry, sameRect, type DockGeometry } from '../
 export type DockPhase = 'undocked' | 'waking' | 'returning' | 'settling' | 'docked' | 'leaving';
 
 export interface OverlayController {
+  setSelectionHold: (active: boolean) => void;
+  setCaptureHidden: (hidden: boolean) => void;
+  ownsWindow: (window: BrowserWindow) => boolean;
   setFollowEnabled: (enabled: boolean) => void;
   isFollowing: () => boolean;
   show: () => void;
@@ -121,6 +124,9 @@ export function createOverlayWindow(options: {
 
   let recoveryCapture = false;
   let frameShown = false;
+  let captureHidden = false;
+  let selectionHold = false;
+  let captureWasVisible = false;
   let destroyed = false;
   let circleClicks = 0;
   let pointerOnBody = false;
@@ -261,6 +267,11 @@ export function createOverlayWindow(options: {
     startPolling();
   });
   win.on('hide', () => {
+    if (captureHidden) {
+      stopPolling();
+      applyMode('passthrough', 'private-capture');
+      return;
+    }
     cancelDocking('hidden');
     options.onVisibilityChanged?.(false);
     stopFollowMotion('hidden');
@@ -284,6 +295,21 @@ export function createOverlayWindow(options: {
   void win.loadURL(pageUrl);
 
   return {
+    setSelectionHold(active): void {
+      if (destroyed || win.isDestroyed() || selectionHold === active) return;
+      selectionHold = active;
+      if (active) {
+        stopFollowMotion('private-selection'); stopPolling();
+        applyMode('passthrough', 'private-selection'); options.onDesktopCursor?.(null);
+      } else if (win.isVisible()) startPolling();
+    },
+    ownsWindow: window => window === win,
+    setCaptureHidden(hidden): void {
+      if (destroyed || win.isDestroyed() || captureHidden === hidden) return;
+      captureHidden = hidden;
+      if (hidden) { captureWasVisible = win.isVisible(); win.hide(); }
+      else if (captureWasVisible) { captureWasVisible = false; win.showInactive(); }
+    },
     setFollowEnabled,
     isFollowing: () => follow.enabled,
     show,
@@ -417,7 +443,7 @@ export function createOverlayWindow(options: {
   };
 
   function startPolling(): void {
-    if (destroyed || pollTimer) {
+    if (destroyed || selectionHold || pollTimer) {
       return;
     }
     sampleAndApply();

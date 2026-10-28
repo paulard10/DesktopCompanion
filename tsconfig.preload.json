@@ -14,5 +14,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
   },
-  "include": ["src/preload/preload.ts", "src/preload/chatPreload.ts", "src/preload/trailPreload.ts", "src/preload/homePreload.ts"]
+  "include": ["src/preload/preload.ts", "src/preload/chatPreload.ts", "src/preload/trailPreload.ts", "src/preload/homePreload.ts", "src/preload/screenSelectionPreload.ts"]
 }

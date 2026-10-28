@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { app, Menu, screen } from 'electron';
+import { app, BrowserWindow, Menu, screen } from 'electron';
+import { createScreenSelectionController, type ScreenSelectionController } from './screenSelectionWindow.js';
 import { createChatController, type ChatController } from './chatWindow.js';
 import { checkDisposableCredential } from './safeCredentialStore.js';
 import { registerAppProtocol, registerAppScheme } from './protocol.js';
@@ -49,6 +50,8 @@ let overlay: OverlayController | null = null;
 let chat: ChatController | null = null;
 let trail: TrailController | null = null;
 let home: HomeController | null = null;
+let selection: ScreenSelectionController | null = null;
+let selectionHolding = false;
 let tray: { destroy: () => void; refresh: () => void } | null = null;
 let trailOn = false;
 let preferences: UserPreferencesStore | null = null;
@@ -81,6 +84,8 @@ async function shutdown(): Promise<void> {
     return;
   }
   quitting = true;
+  selection?.destroy();
+  selection = null;
   wanderClosed = true;
   preferences?.close();
   clearWanderTimer();
@@ -172,6 +177,7 @@ void app.whenReady().then(async () => {
     preloadPath: path.join(preloadPath(), '../homePreload.js'),
     onEnabledChanged: () => tray?.refresh(),
     onActivate: () => {
+      if (selectionHolding) return false;
       const bounds = home?.getDockingBounds();
       return Boolean(bounds && overlay?.requestDocking(bounds));
     },
@@ -189,6 +195,7 @@ void app.whenReady().then(async () => {
     onDockingChanged: phase => home?.feedback(phase === 'undocked' ? 'idle' : phase === 'docked' ? 'docked' : 'busy'),
     preloadPath: preloadPath(),
     getTravelBlock: () => {
+      if (selectionHolding) return { chatOpen: true, listening: false, speaking: false, generating: false };
       const activity = chat?.activity();
       if (!activity) {
         return { chatOpen: false, listening: false, speaking: false, generating: false };
@@ -342,7 +349,7 @@ void app.whenReady().then(async () => {
   };
 
   const runWander = (): void => {
-    if (wanderClosed || !wander.enabled || !overlay || overlay.isFollowing() || overlay.dockingPhase() !== 'undocked') {
+    if (selectionHolding || wanderClosed || !wander.enabled || !overlay || overlay.isFollowing() || overlay.dockingPhase() !== 'undocked') {
       return;
     }
     const view = overlay.wanderView();
@@ -400,20 +407,59 @@ void app.whenReady().then(async () => {
     trailWindow.setEnabled(true);
   }
   const loginStartup = createInstalledLoginStartup(dev, smoke);
+  selection = createScreenSelectionController({
+    enabled: dev && !smoke,
+    preloadPath: path.join(preloadPath(), '../screenSelectionPreload.js'),
+    canStart: () => {
+      const activity = chat?.activity(), view = overlay?.wanderView(), phase = overlay?.dockingPhase();
+      return !quitting && Boolean(view && view.travelPhase === 'idle' &&
+        (phase === 'undocked' || phase === 'docked')) &&
+        !activity?.open && !activity?.listening && !activity?.speaking && !activity?.busy;
+    },
+    onActive: (active) => {
+      selectionHolding = active;
+      overlay?.setSelectionHold(active);
+      if (!active && !quitting) runWander();
+    },
+    conceal: () => {
+      const visible = BrowserWindow.getAllWindows().filter(win => !win.isDestroyed() && win.isVisible());
+      const restore = (): void => {
+        if (quitting) return;
+        try {
+          // Restore Home first; showing the avatar restarts its trusted sampler.
+          for (const win of visible) if (!win.isDestroyed() && !overlay?.ownsWindow(win)) win.showInactive();
+        } finally {
+          overlay?.setCaptureHidden(false);
+          overlay?.moveTop();
+        }
+      };
+      try {
+        overlay?.setCaptureHidden(true);
+        for (const win of visible) if (!win.isDestroyed()) win.hide();
+      } catch (error) { restore(); throw error; }
+      return {
+        verify: () => BrowserWindow.getAllWindows().every(win => win.isDestroyed() || !win.isVisible()),
+        restore,
+      };
+    },
+  });
   tray = createTray({
-    onShow: () => overlay?.show(),
-    onHide: () => overlay?.hide(),
+    onSelectScreenArea: dev && !smoke ? () => selection?.start() : undefined,
+    onShow: () => { selection?.cancel(); overlay?.show(); },
+    onHide: () => { selection?.cancel(); overlay?.hide(); },
     onWake: () => {
+      selection?.cancel();
       overlay?.show();
       overlay?.wake();
     },
     onSleep: () => {
+      selection?.cancel();
       const phase = overlay?.wanderView()?.travelPhase ?? 'idle';
       applyWander(endWanderSession(wander, phase));
       overlay?.sleep();
     },
-    onOpenChat: () => chat?.open(),
-    onToggleRecoveryCapture: (enabled) => overlay?.setRecoveryCapture(enabled),
+    onOpenChat: () => { selection?.cancel(); chat?.open(); },
+    onToggleRecoveryCapture: (enabled) => { selection?.cancel(); overlay?.setRecoveryCapture(enabled); },
     isRecoveryCapture: () => overlay?.isRecoveryCapture() ?? false,
     isWandering: () => wander.enabled,
     isTrail: () => trailOn,
@@ -433,6 +479,7 @@ void app.whenReady().then(async () => {
     devMarker: dev,
     isFollowing: () => overlay?.isFollowing() ?? false,
     onFollow: (enabled) => {
+      selection?.cancel();
       if (!dev || !overlay) return;
       if (enabled) {
         applyWander(disableWander(wander, overlay.wanderView()?.travelPhase ?? 'idle'));
@@ -440,11 +487,13 @@ void app.whenReady().then(async () => {
       overlay.setFollowEnabled(enabled);
     },
     isHome: () => home?.isEnabled() ?? false,
-    onHome: (enabled) => home?.setEnabled(enabled),
+    onHome: (enabled) => { selection?.cancel(); home?.setEnabled(enabled); },
     onMoveTest: () => {
+      selection?.cancel();
       runMoveTest('tray');
     },
     onMove: (direction) => {
+      selection?.cancel();
       const activity = chat?.activity();
       const block = travelBlock({
         chatOpen: activity?.open ?? false,
@@ -467,6 +516,7 @@ void app.whenReady().then(async () => {
       overlay?.moveBy(direction);
     },
     onWander: (enabled) => {
+      selection?.cancel();
       if (!overlay) {
         return;
       }
@@ -485,6 +535,7 @@ void app.whenReady().then(async () => {
       applyWander(enableWander(wander, Date.now(), view));
     },
     onTrail: (action) => {
+      selection?.cancel();
       if (action === 'reset' || action === 'marker') {
         if (!dev) {
           return;

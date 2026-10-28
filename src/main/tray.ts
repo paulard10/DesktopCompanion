@@ -33,6 +33,7 @@ export function createTray(options: {
   onWander?: (enabled: boolean) => void;
   onTrail?: (action: 'enable' | 'disable' | 'reset' | 'marker') => void;
   onQuit: () => void;
+  onSelectScreenArea?: () => void;
 }): CompanionTray {
   const tray = new Tray(loadTrayImage());
   tray.setToolTip('Desktop Companion');
@@ -130,6 +131,7 @@ export function createTray(options: {
               checked: options.isHome?.() ?? false,
               click: (item: { checked?: boolean }) => { options.onHome?.(Boolean(item.checked)); refresh(); } },
             { label: 'Test window move', click: () => options.onMoveTest?.() },
+            ...(options.onSelectScreenArea ? [{ label: 'Select Screen Area (Experimental)', click: options.onSelectScreenArea }] : []),
             { label: 'Reset Trail', click: () => options.onTrail?.('reset') },
             ...(options.devMarker
               ? [{ label: 'Show Trail Marker', click: () => options.onTrail?.('marker') }]

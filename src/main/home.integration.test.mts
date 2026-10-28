@@ -320,6 +320,20 @@ test('development-only Home checkbox is default OFF, reflects enable/disable, an
   item.click({ checked: false }); assert.equal(enabled, false); dev.destroy();
 });
 
+test('screen selection is a development-only action, never a preference checkbox', () => {
+  let selected = 0;
+  const common = { onShow() {}, onHide() {}, onWake() {}, onSleep() {}, onOpenChat() {}, onQuit() {},
+    onToggleRecoveryCapture() {}, isRecoveryCapture: () => false, isWandering: () => false,
+    isTrail: () => false, isStartAwake: () => false, startupAvailable: false, isStartWithWindows: () => false,
+    onSelectScreenArea: () => selected++ };
+  const production = createTray({ ...common, devMovement: false });
+  assert.equal(FakeTray.last.menu.some((i: any) => i.label === 'Select Screen Area (Experimental)'), false);
+  production.destroy();
+  const dev = createTray({ ...common, devMovement: true });
+  const action = FakeTray.last.menu.find((i: any) => i.label === 'Select Screen Area (Experimental)');
+  assert.ok(action); assert.equal(action.type, undefined); action.click(); assert.equal(selected, 1); dev.destroy();
+});
+
 test('main wiring keeps Home OFF in smoke, exposes only its narrow activation and has no persisted preference', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const start = main.indexOf('home = createHomeWindow('), end = main.indexOf('overlay = createOverlayWindow(', start);
@@ -338,6 +352,35 @@ function dockFixture(t: any) {
   return { ...f, win, activate: () => { f.point(win, 56, 75); f.click(win); },
     settle: () => { f.point(win, 56, 75); f.click(win); f.advance(5000); } };
 }
+
+test('temporary private-capture hide restores a docked sleeper without undocking or waking', t => {
+  const f = dockFixture(t); f.settle(); f.phase('SLEEPING');
+  const bounds = f.avatarWin.getBounds(), sleeps = f.sleeps();
+  const wakes = f.avatarWin.webContents.sent.filter(s => s.channel === 'overlay:behavior' && s.payload === 'wake').length;
+  f.gates.chatOpen = true;
+  f.avatar.setCaptureHidden(true); f.win.hide(); f.advance(250);
+  assert.equal(f.avatar.dockingPhase(), 'docked'); assert.equal(f.avatarWin.isVisible(), false);
+  f.win.showInactive(); f.avatar.setCaptureHidden(false); f.gates.chatOpen = false; f.advance(500);
+  assert.equal(f.avatar.dockingPhase(), 'docked'); assert.deepEqual(f.avatarWin.getBounds(), bounds);
+  assert.equal(f.sleeps(), sleeps); assert.equal(f.avatarWin.focuses, 0);
+  assert.equal(f.avatarWin.webContents.sent.filter(s => s.channel === 'overlay:behavior' && s.payload === 'wake').length, wakes);
+});
+
+test('private-capture visibility does not reveal an already hidden avatar', t => {
+  const f = fixture(t); f.avatar.hide(); f.avatar.setCaptureHidden(true); f.avatar.setCaptureHidden(false);
+  assert.equal(f.avatarWin.isVisible(), false); assert.equal(f.avatarWin.focuses, 0);
+});
+
+test('capture hold preserves enabled follow intent and never enables a disabled mode', t => {
+  const f = fixture(t); f.avatar.setFollowEnabled(true); f.gates.chatOpen = true; f.advance(300);
+  f.avatar.setSelectionHold(true);
+  assert.equal(f.avatarWin.ignore, true); assert.equal(f.timers.size, 0);
+  f.avatar.setCaptureHidden(true); f.advance(500); f.avatar.setCaptureHidden(false);
+  f.avatar.setSelectionHold(false);
+  assert.equal(f.avatar.isFollowing(), true);
+  f.avatar.setFollowEnabled(false); f.gates.chatOpen = false; f.advance(500);
+  assert.equal(f.avatar.isFollowing(), false);
+});
 
 test('docking integration stays idle at startup and showing Home never starts travel or Sleep', t => {
   const f = dockFixture(t); f.advance(3000);

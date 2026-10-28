@@ -23,6 +23,7 @@ export default defineConfig({
         chat: path.join(rootDir, 'src/renderer/chat.html'),
         trail: path.join(rootDir, 'src/renderer/trail.html'),
         home: path.join(rootDir, 'src/renderer/home.html'),
+        screenSelection: path.join(rootDir, 'src/renderer/screen-selection.html'),
       },
     },
   },

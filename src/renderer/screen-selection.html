@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Private local preview</title>
+<link rel="stylesheet" href="./screen-selection.css"></head>
+<body>
+  <div id="surface" aria-label="Drag to select a screen region"><div id="outline" hidden></div></div>
+  <section id="controls" aria-label="Private screen selection">
+    <strong id="heading">Select a screen area</strong>
+    <p id="status" role="status">Drag a rectangle. No screenshot is taken until you confirm.</p>
+    <p id="privacy">Confirmation briefly acquires this display in memory, then keeps only your crop. Nothing is saved or sent to AI.</p>
+    <button id="confirm" type="button" disabled>Capture selected area</button>
+    <button id="cancel" type="button">Cancel</button>
+    <button id="fit" type="button" hidden>Actual pixels / Fit</button>
+  </section>
+  <main id="preview" hidden aria-label="Local image preview"><img id="crop" alt="User-approved cropped screen area"></main>
+  <script type="module" src="./screen-selection.ts"></script>
+</body></html>
