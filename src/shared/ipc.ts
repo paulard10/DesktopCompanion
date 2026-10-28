@@ -51,7 +51,18 @@ export const IpcChannels = {
   trailFault: 'trail:fault',
   trailDrew: 'trail:drew',
   trailMarker: 'trail:marker',
+  homeReady: 'home:ready',
+  homeClick: 'home:click',
+  homeFeedback: 'home:feedback',
 } as const;
+
+/** Home has no movement, capture-region, filesystem or generic IPC capability. */
+export type HomeFeedback = 'pulse' | 'busy' | 'docked' | 'idle' | 'blocked';
+export interface HomeBridge {
+  notifyReady: () => void;
+  notifyClick: () => void;
+  onFeedback: (listener: (feedback: HomeFeedback) => void) => () => void;
+}
 
 export const BEHAVIOR_PHASES = [
   'SLEEPING',

@@ -13,6 +13,7 @@ let clock = 0, cursor = { x: 500, y: 400 }, reduced = false, animationReads = 0;
 const display = { id: 1, scaleFactor: 1, workArea: { x: 0, y: 0, width: 1920, height: 1040 } };
 const windows: FakeWindow[] = [];
 class FakeContents extends EventEmitter {
+  mainFrame = { parent: null, url: '' };
   messages: Array<{ channel: string; payload: any }> = [];
   isDestroyed() { return false; }
   send(channel: string, payload: any) { this.messages.push({ channel, payload }); }
@@ -32,7 +33,7 @@ class FakeWindow extends EventEmitter {
   setIgnoreMouseEvents(ignore: boolean) { this.ignore = ignore; }
   setBackgroundMaterial() {} setBackgroundColor() {} setAlwaysOnTop() {}
   setVisibleOnAllWorkspaces() {} setMenuBarVisibility() {} setSkipTaskbar() {} moveTop() {}
-  loadURL() { return Promise.resolve(); }
+  loadURL(url: string) { this.webContents.mainFrame.url = url; return Promise.resolve(); }
 }
 const ipc = new EventEmitter();
 const screen = Object.assign(new EventEmitter(), {
@@ -85,7 +86,7 @@ function fixture(t: any, dev = true) {
     onTrail: (sample: any) => trail.push(sample), onFollowChanged: () => changed++,
   });
   const win = windows.at(-1)!;
-  const event = { senderFrame: { parent: null, url: dev ? 'http://127.0.0.1:5173/' : 'app://companion/index.html' } };
+  const event = { sender: win.webContents, senderFrame: win.webContents.mainFrame };
   const phase = (name: string) => ipc.emit('overlay:phase', event, name);
   ipc.emit('overlay:frame-ready', event, 'm1.6');
   phase('IDLE');

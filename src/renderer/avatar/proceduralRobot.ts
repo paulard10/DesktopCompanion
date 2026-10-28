@@ -21,6 +21,7 @@ import {
   ANTENNA_STEM_LENGTH,
   ANTENNA_TIP_RADIUS,
   BODY_RADIUS_WORLD,
+  BODY_REST_SCALE,
   FOREARM_LENGTH,
   HAND_RADIUS,
   SHOULDER_X,
@@ -79,7 +80,7 @@ export function createProceduralRobot(): AvatarAdapter {
 
   const body = new Mesh(track(new SphereGeometry(BODY_RADIUS_WORLD, 64, 48), geometries), shell);
   body.name = 'Main body';
-  body.scale.set(1.03, 0.98, 0.99);
+  body.scale.set(BODY_REST_SCALE.x, BODY_REST_SCALE.y, BODY_REST_SCALE.z);
   const bodyRest = { x: body.scale.x, y: body.scale.y, z: body.scale.z };
   pivot.add(body);
 

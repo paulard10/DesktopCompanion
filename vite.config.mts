@@ -22,6 +22,7 @@ export default defineConfig({
         main: path.join(rootDir, 'src/renderer/index.html'),
         chat: path.join(rootDir, 'src/renderer/chat.html'),
         trail: path.join(rootDir, 'src/renderer/trail.html'),
+        home: path.join(rootDir, 'src/renderer/home.html'),
       },
     },
   },

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'" />
+    <title>Desktop Companion Home</title>
+    <link rel="stylesheet" href="./home.css" />
+  </head>
+  <body>
+    <button id="home" type="button" aria-label="Ir a la plataforma; si el robot descansa encima, despertar y salir.">
+      <svg id="platform" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="chassis-shade" x1="0" y1="0" x2="0.1" y2="1">
+            <stop offset="0" stop-color="#f9fcfb" /><stop offset="0.55" stop-color="#dce5e1" />
+            <stop offset="1" stop-color="#8d9d96" />
+          </linearGradient>
+          <linearGradient id="rim-shade" x1="0" y1="0" x2="0.2" y2="1">
+            <stop offset="0" stop-color="#ffffff" /><stop offset="1" stop-color="#dfe8e3" />
+          </linearGradient>
+          <radialGradient id="glass-shade" cx="0.35" cy="0.1" r="0.9">
+            <stop offset="0" stop-color="#48534f" /><stop offset="0.32" stop-color="#19221e" />
+            <stop offset="0.75" stop-color="#030806" /><stop offset="1" stop-color="#07100b" />
+          </radialGradient>
+          <linearGradient id="glass-reflection" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#ffffff" stop-opacity="0.65" />
+            <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+          </linearGradient>
+        </defs>
+        <path id="chassis" fill="url(#chassis-shade)" />
+        <ellipse id="deck" fill="url(#rim-shade)" />
+        <ellipse id="surface" cx="56" cy="46" rx="42" ry="13" fill="url(#glass-shade)" />
+        <ellipse cx="56" cy="46" rx="35" ry="9" fill="none" stroke="#64f893" stroke-width="1.5" />
+        <path d="M26 42 Q42 34 66 38 Q54 38 37 44 Z" fill="url(#glass-reflection)" />
+        <path d="M18 43 Q28 34 43 33" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" />
+        <path d="M19 68 Q56 82 93 68" fill="none" stroke="#65f998" stroke-width="2.5" stroke-linecap="round" />
+        <path d="M14 61 L19 64 M93 64 L98 61" fill="none" stroke="#81948a" stroke-width="1.5" stroke-linecap="round" />
+        <g class="halo" fill="none" stroke="#c1ffd5" stroke-width="3" stroke-linecap="round">
+          <ellipse cx="56" cy="46" rx="35" ry="9" />
+          <path d="M19 68 Q56 82 93 68" />
+        </g>
+      </svg>
+    </button>
+    <script type="module" src="./home.ts"></script>
+  </body>
+</html>

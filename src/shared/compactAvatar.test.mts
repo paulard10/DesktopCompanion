@@ -19,6 +19,7 @@ import { applyPresence, PRESENCE_NAMES } from './presence.ts';
 import { restSecondary, secondarySampleInto } from './secondaryMotion.ts';
 import { gestureOffset, ROBOT_GESTURES } from './gesturePose.ts';
 import { BEHAVIOR_PHASES } from './ipc.ts';
+import { projectedBodyBottomDip } from './dockingGeometry.ts';
 import { alertness, initialBehavior, reduceBehavior, stepBehavior, wakeBounce } from './behavior.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -42,7 +43,7 @@ after(() => avatar.dispose());
 
 const neutral: AvatarPose = { ...ambientPose(0), hover: 0, tiltX: 0, tiltZ: 0, antenna: 0 };
 
-function project(layout: CompanionLayout, pose: AvatarPose, checkArm = false, pulse = false) {
+function project(layout: CompanionLayout, pose: AvatarPose, checkArm = false, pulse = false, bodyOnly = false) {
   const { width, height } = layout.windowDip;
   const camera = new PerspectiveCamera(CAMERA_FOV_DEGREES, width / height, 0.1, 50);
   camera.position.z = cameraDistanceForBody({
@@ -60,6 +61,7 @@ function project(layout: CompanionLayout, pose: AvatarPose, checkArm = false, pu
   let armPoints = 0;
   avatar.object.traverse(node => {
     if (!('isMesh' in node) || !node.isMesh) return;
+    if (bodyOnly && node.name !== 'Main body') return;
     const mesh = node as import('three').Mesh;
     let parent: import('three').Object3D | null = mesh;
     while (parent && parent.name !== 'Left arm' && parent.name !== 'Right arm') parent = parent.parent;
@@ -81,6 +83,15 @@ function project(layout: CompanionLayout, pose: AvatarPose, checkArm = false, pu
   });
   return { ...bounds, height: bounds.bottom - bounds.top, armPoints };
 }
+
+test('docking lower-body anchor agrees with actual sleeping mesh projection without changing the camera or rig', () => {
+  const sleeping = presentCharacter({ ambient: { ...ambientPose(0), hover: 0 }, alertness: 0,
+    wakeBounce: 0, gazeYaw: 0, gazePitch: 0 });
+  const body = project(COMPACT_LAYOUT, sleeping, false, false, true);
+  assert.ok(Math.abs(body.bottom - projectedBodyBottomDip()) < 0.15,
+    `actual sleeping body bottom=${body.bottom}, analytic=${projectedBodyBottomDip()}`);
+  assert.ok(body.top > 0 && body.bottom < COMPACT_LAYOUT.windowDip.height);
+});
 
 function decision(x: number, y: number, at = 1000, previous = INITIAL_POINTER_STATE, visible = true, recoveryCapture = false, now = at) {
   const observation = observeCircle({

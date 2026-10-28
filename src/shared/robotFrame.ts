@@ -5,6 +5,7 @@
  */
 
 export const BODY_RADIUS_WORLD = 1;
+export const BODY_REST_SCALE = { x: 1.03, y: 0.98, z: 0.99 } as const;
 export const CAMERA_FOV_DEGREES = 28;
 
 export const ANTENNA_ROOT_Y = 0.9;

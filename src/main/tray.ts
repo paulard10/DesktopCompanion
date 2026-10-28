@@ -26,6 +26,8 @@ export function createTray(options: {
   devMarker?: boolean;
   isFollowing?: () => boolean;
   onFollow?: (enabled: boolean) => void;
+  isHome?: () => boolean;
+  onHome?: (enabled: boolean) => void;
   onMove?: (direction: 'left' | 'right' | 'up' | 'down' | 'home' | 'stop') => void;
   onMoveTest?: () => void;
   onWander?: (enabled: boolean) => void;
@@ -124,6 +126,9 @@ export function createTray(options: {
             { label: 'Follow Cursor (Experimental)', type: 'checkbox' as const,
               checked: options.isFollowing?.() ?? false,
               click: (item: { checked?: boolean }) => { options.onFollow?.(Boolean(item.checked)); refresh(); } },
+            { label: 'Show Home (Experimental)', type: 'checkbox' as const,
+              checked: options.isHome?.() ?? false,
+              click: (item: { checked?: boolean }) => { options.onHome?.(Boolean(item.checked)); refresh(); } },
             { label: 'Test window move', click: () => options.onMoveTest?.() },
             { label: 'Reset Trail', click: () => options.onTrail?.('reset') },
             ...(options.devMarker

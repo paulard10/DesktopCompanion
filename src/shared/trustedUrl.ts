@@ -29,6 +29,10 @@ export function isTrailRendererUrl(url: string, dev: boolean): boolean {
   return trustedPath(url, dev) === '/trail.html';
 }
 
+export function isHomeRendererUrl(url: string, dev: boolean): boolean {
+  return url === (dev ? 'http://127.0.0.1:5173/home.html' : 'app://companion/home.html');
+}
+
 function trustedPath(url: string, dev: boolean): string | null {
   if (!isTrustedRendererUrl(url, dev)) {
     return null;

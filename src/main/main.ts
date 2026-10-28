@@ -8,6 +8,7 @@ import { registerAppProtocol, registerAppScheme } from './protocol.js';
 import { installSecurityPolicy } from './security.js';
 import { createOverlayWindow, preloadPath, rendererRoot, type OverlayController } from './overlayWindow.js';
 import { createTrailWindow, type TrailController } from './trailWindow.js';
+import { createHomeWindow, type HomeController } from './homeWindow.js';
 import { createTray } from './tray.js';
 import { createInstalledLoginStartup } from './windowsLoginStartup.js';
 import { APP_USER_MODEL_ID } from '../shared/windowsLoginStartup.js';
@@ -47,6 +48,7 @@ if (!gotLock) {
 let overlay: OverlayController | null = null;
 let chat: ChatController | null = null;
 let trail: TrailController | null = null;
+let home: HomeController | null = null;
 let tray: { destroy: () => void; refresh: () => void } | null = null;
 let trailOn = false;
 let preferences: UserPreferencesStore | null = null;
@@ -90,6 +92,8 @@ async function shutdown(): Promise<void> {
   }
   tray?.destroy();
   tray = null;
+  home?.destroy();
+  home = null;
   await chat?.destroy();
   chat = null;
   overlay?.setExplore(null);
@@ -163,10 +167,26 @@ void app.whenReady().then(async () => {
     microphoneGate,
   });
 
+  home = createHomeWindow({
+    dev: dev && !smoke,
+    preloadPath: path.join(preloadPath(), '../homePreload.js'),
+    onEnabledChanged: () => tray?.refresh(),
+    onActivate: () => {
+      const bounds = home?.getDockingBounds();
+      return Boolean(bounds && overlay?.requestDocking(bounds));
+    },
+    onUnavailable: () => overlay?.cancelDocking('home-unavailable'),
+    raiseAvatar: source => overlay?.moveAboveHome(source) ?? false,
+  });
   overlay = createOverlayWindow({
     dev,
     verifyWebGL: smoke,
     onFollowChanged: () => tray?.refresh(),
+    onVisibilityChanged: (visible) => home?.setAppVisible(visible),
+    onDesktopCursor: (sample) => { if (home?.isEnabled()) home.observe(sample); },
+    getDockPlatform: () => home?.getDockingBounds() ?? null,
+    onDockingStart: () => applyWander(disableWander(wander, overlay?.wanderView()?.travelPhase ?? 'idle')),
+    onDockingChanged: phase => home?.feedback(phase === 'undocked' ? 'idle' : phase === 'docked' ? 'docked' : 'busy'),
     preloadPath: preloadPath(),
     getTravelBlock: () => {
       const activity = chat?.activity();
@@ -322,7 +342,7 @@ void app.whenReady().then(async () => {
   };
 
   const runWander = (): void => {
-    if (wanderClosed || !wander.enabled || !overlay || overlay.isFollowing()) {
+    if (wanderClosed || !wander.enabled || !overlay || overlay.isFollowing() || overlay.dockingPhase() !== 'undocked') {
       return;
     }
     const view = overlay.wanderView();
@@ -419,6 +439,8 @@ void app.whenReady().then(async () => {
       }
       overlay.setFollowEnabled(enabled);
     },
+    isHome: () => home?.isEnabled() ?? false,
+    onHome: (enabled) => home?.setEnabled(enabled),
     onMoveTest: () => {
       runMoveTest('tray');
     },
@@ -448,6 +470,7 @@ void app.whenReady().then(async () => {
       if (!overlay) {
         return;
       }
+      if (enabled) overlay.cancelDocking('wander-override');
       const view = overlay.wanderView();
       if (!view) {
         return;
