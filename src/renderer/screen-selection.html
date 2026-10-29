@@ -13,5 +13,23 @@
     <button id="fit" type="button" hidden>Actual pixels / Fit</button>
   </section>
   <main id="preview" hidden aria-label="Local image preview"><img id="crop" alt="User-approved cropped screen area"></main>
+  <section id="vision" hidden aria-label="Offline visual question">
+    <p class="local-label">LOCAL SIMULATION ONLY · No upload · No AI analysis</p>
+    <label for="question">Ask about this image</label>
+    <textarea id="question" maxlength="500" rows="2" placeholder="Write your own question" aria-describedby="question-count vision-status"></textarea>
+    <span id="question-count">0 / 500</span>
+    <label for="scenario">Simulated outcome</label>
+    <select id="scenario"><option value="success">Success (no image understanding)</option><option value="empty">Empty response</option><option value="rate-limit">Rate limit</option><option value="timeout">Timeout</option></select>
+    <button id="review-question" type="button" disabled>Review question</button>
+    <div id="vision-review" hidden>
+      <strong>Review selected screen area and question</strong>
+      <p>The image above is the exact crop used. Only a local simulation is authorized. Nothing will leave this device.</p>
+      <p id="review-text"></p>
+      <button id="run-offline" type="button">Run offline vision test</button>
+    </div>
+    <button id="cancel-vision" type="button" hidden>Cancel review / test</button>
+    <p id="vision-status" role="status" aria-live="polite"></p>
+    <p id="vision-answer" hidden></p>
+  </section>
   <script type="module" src="./screen-selection.ts"></script>
 </body></html>

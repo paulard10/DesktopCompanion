@@ -1,4 +1,4 @@
-// Hidden, synthetic-only NativeImage and sandbox preview proof. Never captures
+// Hidden, synthetic-only NativeImage, sandbox preview and offline consent proof. Never captures
 // the desktop, opens the selector, reads credentials, or invokes the main app.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -31,16 +31,21 @@ if (!process.versions.electron) {
   const { registerAppScheme, registerAppProtocol } = require('../dist/main/protocol.js');
   const { SELECTION_CSP } = require('../dist/main/screenSelectionWindow.js');
   const { pixelCrop, captureSize } = require('../dist/shared/screenSelection.js');
+  const { createOfflineVisionSession } = require('../dist/main/offlineVisionSession.js');
   const directory = process.env.COMPANION_SELECTION_PROFILE;
   assert.ok(directory && path.basename(directory).startsWith('companion-selection-proof-'));
   app.setPath('userData', directory); app.setPath('sessionData', directory); registerAppScheme();
   // Make any accidental real desktop request an immediate test failure.
   desktopCapturer.getSources = () => { throw new Error('Real desktop capture forbidden in synthetic proof'); };
-  let win, finished = false, processCountBeforeWindow = 0;
+  let win, visualSession, finished = false, processCountBeforeWindow = 0;
+  let externalAttempts = 0, visionOperations = 0, lastRun;
+  globalThis.fetch = () => { externalAttempts++; throw new Error('No network in offline proof'); };
   const deadline = setTimeout(() => finish(false, 'deadline'), 15_000);
   function finish(ok, detail = '') {
     if (finished) return; finished = true; clearTimeout(deadline);
     ipcMain.removeAllListeners('selection:ready');
+    ipcMain.removeAllListeners('selection:vision');
+    visualSession?.dispose(); visualSession = undefined; lastRun = undefined;
     const processCountWithWindow = app.getAppMetrics().length;
     if (win && !win.isDestroyed()) win.destroy();
     console.log(`selection-proof: ${ok ? 'PASS' : 'FAIL'} ${detail}`);
@@ -52,7 +57,11 @@ if (!process.versions.electron) {
     session.defaultSession.setPermissionRequestHandler((_wc, _p, cb) => cb(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
     session.defaultSession.webRequest.onHeadersReceived((d, cb) => cb({ responseHeaders: { ...d.responseHeaders, 'Content-Security-Policy': [SELECTION_CSP] } }));
-    session.defaultSession.webRequest.onBeforeRequest((d, cb) => cb({ cancel: !d.url.startsWith('app://companion/') }));
+    session.defaultSession.webRequest.onBeforeRequest((d, cb) => {
+      const external = !d.url.startsWith('app://companion/');
+      if (external && !d.url.startsWith('blob:')) externalAttempts++;
+      cb({ cancel: external });
+    });
     processCountBeforeWindow = app.getAppMetrics().length;
     win = new BrowserWindow({ show: false, width: 640, height: 480,
       webPreferences: { preload: path.join(root, 'dist/preload/screenSelectionPreload.js'), sandbox: true,
@@ -66,6 +75,7 @@ if (!process.versions.electron) {
         const content = win.getContentBounds();
         assert.deepEqual(viewport, { width: content.width, height: content.height,
           dpr: screen.getDisplayMatching(content).scaleFactor });
+        assert.equal(await win.webContents.executeJavaScript(`document.querySelector('#vision').hidden && !document.querySelector('#crop').hasAttribute('src')`), true);
         // Each fixture pixel encodes its source x/y; no screenshot or fixture file.
         let png, output;
         for (const scaleFactor of [1, 1.25, 1.5]) {
@@ -91,13 +101,83 @@ if (!process.versions.electron) {
           const image = document.querySelector('#crop'); await image.decode();
           return { keys: Object.keys(window.screenSelection).sort(), width: image.naturalWidth, height: image.naturalHeight,
             blob: image.src.startsWith('blob:'), preview: document.body.classList.contains('preview'),
-            label: document.querySelector('#heading').textContent, noAsk: !document.body.textContent.includes('Ask about this') };
+            label: document.querySelector('#heading').textContent, visionHidden: document.querySelector('#vision').hidden };
         })()`);
-        assert.deepEqual(view.keys, ['cancel', 'confirm', 'onNotice', 'ready', 'select']);
+        assert.deepEqual(view.keys, ['cancel', 'confirm', 'onNotice', 'ready', 'select', 'vision']);
         assert.equal(view.width, output.width); assert.equal(view.height, output.height);
-        assert.equal(view.blob, true); assert.equal(view.preview, true); assert.equal(view.noAsk, true);
+        assert.equal(view.blob, true); assert.equal(view.preview, true); assert.equal(view.visionHidden, true);
         assert.match(view.label, /nothing sent to AI/); assert.equal(win.isVisible(), false);
-        finish(true, 'native crop contents at 100/125/150%; sandbox preload; CSP blob preview; hidden window disposed; no desktop capture');
+        const payload = { sessionId: 'synthetic-only', displayId: 5, phase: 'PREVIEWING', width: 160, height: 120 };
+        visualSession = createOfflineVisionSession({ sessionId: payload.sessionId,
+          crop: { kind: 'approved-local-crop', mime: 'image/png', bytes: png, ...output,
+            x: 30, y: 45, sourceWidth: 240, sourceHeight: 180 },
+          publish(vision) {
+            if (vision.phase === 'running') visionOperations++;
+            win.webContents.send('selection:notice', { ...payload, vision });
+          },
+        });
+        ipcMain.on('selection:vision', (e, action) => {
+          if (e.sender !== win.webContents || e.senderFrame !== win.webContents.mainFrame ||
+              e.senderFrame.parent !== null || e.senderFrame.url !== 'app://companion/screen-selection.html') return;
+          if (action.type === 'run') lastRun = action;
+          visualSession?.dispatch(action);
+        });
+        visualSession.dispatch({ type: 'edit', sessionId: payload.sessionId, question: '', revision: 1, scenario: 'success' });
+        const evaluate = code => win.webContents.executeJavaScript(code);
+        const previewBlob = await evaluate(`document.querySelector('#crop').src`);
+        const until = async expression => {
+          for (let i = 0; i < 60; i++) {
+            if (await evaluate(expression)) return;
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
+          throw new Error('Synthetic renderer state deadline');
+        };
+        await until(`!document.querySelector('#vision').hidden`);
+        assert.equal(await evaluate(`document.querySelector('#review-question').disabled`), true);
+        await evaluate(`{
+          const q=document.querySelector('#question'); q.value='¿Qué significa este error?';
+          q.dispatchEvent(new Event('input',{bubbles:true}));
+          q.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+        }`);
+        await until(`!document.querySelector('#review-question').disabled`);
+        assert.equal(visionOperations, 0);
+        await evaluate(`document.querySelector('#review-question').click()`);
+        await until(`!document.querySelector('#vision-review').hidden`);
+        assert.equal(await evaluate(`document.querySelector('#review-text').textContent`), '¿Qué significa este error?');
+        assert.equal(await evaluate(`document.querySelector('#crop').src`), previewBlob);
+        assert.equal(visionOperations, 0);
+        await evaluate(`{
+          const q=document.querySelector('#question');q.value='Pregunta editada';q.dispatchEvent(new Event('input',{bubbles:true}));
+        }`);
+        await until(`document.querySelector('#vision-review').hidden`);
+        await evaluate(`document.querySelector('#review-question').click()`);
+        await until(`!document.querySelector('#vision-review').hidden`);
+        assert.equal(await evaluate(`document.querySelector('#review-text').textContent`), 'Pregunta editada');
+        await evaluate(`document.querySelector('#run-offline').click();document.querySelector('#run-offline').click()`);
+        await until(`!document.querySelector('#vision-answer').hidden`);
+        assert.equal(visionOperations, 1);
+        assert.match(await evaluate(`document.querySelector('#vision-answer').textContent`), /No visual understanding was performed/);
+        assert.match(await evaluate(`document.querySelector('#vision-status').textContent`), /Simulated response — no AI was called/);
+        visualSession.dispatch(lastRun); assert.equal(visionOperations, 1);
+        // A pending simulated timeout can be cancelled through the actual preload.
+        await evaluate(`{
+          const s=document.querySelector('#scenario');s.value='timeout';s.dispatchEvent(new Event('change',{bubbles:true}));
+        }`);
+        await until(`!document.querySelector('#review-question').disabled`);
+        await evaluate(`document.querySelector('#review-question').click()`);
+        await until(`!document.querySelector('#vision-review').hidden`);
+        await evaluate(`document.querySelector('#run-offline').click()`);
+        await until(`document.querySelector('#question').disabled`);
+        await evaluate(`document.querySelector('#cancel-vision').click()`);
+        await until(`!document.querySelector('#question').disabled`);
+        assert.equal(await evaluate(`document.querySelector('#vision-answer').hidden`), true);
+        assert.equal(externalAttempts, 0); assert.equal(win.isVisible(), false);
+        // Real discard button -> preload -> owned main handler, no actual capture.
+        ipcMain.once('selection:cancel', (e, id) => {
+          assert.equal(e.sender, win.webContents); assert.equal(id, payload.sessionId);
+          visualSession.dispose(); finish(true, 'native crop at 100/125/150%; exact review/edit/review/one-use mock/cancel/discard via sandbox preload; zero external attempts; no desktop capture');
+        });
+        await evaluate(`document.querySelector('#cancel').click()`);
       } catch (error) { finish(false, error.message); }
     });
     void win.loadURL('app://companion/screen-selection.html').catch(() => finish(false, 'load'));

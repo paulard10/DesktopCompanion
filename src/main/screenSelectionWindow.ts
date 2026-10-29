@@ -3,10 +3,11 @@ import { BrowserWindow, desktopCapturer, dialog, ipcMain, screen, session, type 
 import { captureSize, pixelCrop, sameSelectionDisplay, selectionViewportMatches, validSelection, SCREEN_SELECTION,
   type SelectionDisplay, type SelectionNotice, type SelectionRect, type SelectionPhase } from '../shared/screenSelection.js';
 import { waitForWindowsComposition } from './windowsComposition.js';
+import { createOfflineVisionSession, type OfflineVisionSession } from './offlineVisionSession.js';
 
 export const SELECTION_PAGE = 'http://127.0.0.1:5173/screen-selection.html';
 export const SELECTION_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self'; img-src blob:; connect-src 'none'; object-src 'none'";
-const channels = { ready: 'selection:ready', select: 'selection:select', confirm: 'selection:confirm', cancel: 'selection:cancel' } as const;
+const channels = { ready: 'selection:ready', select: 'selection:select', confirm: 'selection:confirm', cancel: 'selection:cancel', vision: 'selection:vision' } as const;
 export interface ScreenSelectionController { start: () => void; cancel: () => void; active: () => boolean; destroy: () => void }
 
 export function createScreenSelectionController(options: {
@@ -18,7 +19,7 @@ export function createScreenSelectionController(options: {
 }): ScreenSelectionController {
   type Live = { id: string; display: SelectionDisplay; phase: SelectionPhase; win: BrowserWindow;
     rect?: SelectionRect; timeout: ReturnType<typeof setTimeout>; abort: AbortController;
-    visibility?: ReturnType<typeof options.conceal>; ready: boolean };
+    visibility?: ReturnType<typeof options.conceal>; ready: boolean; vision?: OfflineVisionSession };
   let live: Live | null = null, disposed = false, acquiring = false;
   const report = (message: string): void => {
     if (!disposed) void dialog.showMessageBox({ type: 'info', title: 'Private screen selection', message });
@@ -61,7 +62,7 @@ export function createScreenSelectionController(options: {
   }
   function finish(): void {
     const s = live; if (!s) return;
-    live = null; clearTimeout(s.timeout); s.abort.abort();
+    live = null; clearTimeout(s.timeout); s.abort.abort(); s.vision?.dispose(); s.vision = undefined;
     try { if (!s.win.isDestroyed()) s.win.destroy(); }
     finally {
       try { restore(s); } catch { report('Some companion windows could not be restored. Use Tray Show or restart.'); }
@@ -97,6 +98,11 @@ export function createScreenSelectionController(options: {
   };
   const onCancel = (event: IpcMainEvent, ...args: unknown[]): void => {
     const s = owned(event); if (s && args.length === 1 && args[0] === s.id) finish();
+  };
+  const onVision = (event: IpcMainEvent, ...args: unknown[]): void => {
+    const s = owned(event);
+    if (!options.enabled || !s || s.phase !== 'PREVIEWING' || args.length !== 1) return;
+    s.vision?.dispatch(args[0]);
   };
   async function capture(s: Live): Promise<void> {
     const started = performance.now();
@@ -138,7 +144,18 @@ export function createScreenSelectionController(options: {
       s.win.setAlwaysOnTop(false);
       s.win.setBounds({ x: work.x + Math.round((work.width - width) / 2), y: work.y + Math.round((work.height - height) / 2), width, height });
       s.win.setResizable(true);
-      notice(s, { image: { png, ...size } });
+      let initialImage: SelectionNotice['image'] = { png, ...size };
+      // Only the trusted acquisition supplies canonical pixels and geometry.
+      // Renderer actions contain IDs/question/token, never image bytes or paths.
+      s.vision = createOfflineVisionSession({ sessionId: s.id,
+        crop: { kind: 'approved-local-crop', mime: 'image/png', bytes: png, ...crop,
+          sourceWidth: actual.width, sourceHeight: actual.height },
+        publish: vision => {
+          const image = initialImage; initialImage = undefined;
+          notice(s, { vision, ...(image ? { image } : {}) });
+        },
+      });
+      s.vision.dispatch({ type: 'edit', sessionId: s.id, question: '', revision: 1, scenario: 'success' });
       s.win.show();
       // Aggregate only: no origins, pixels, source names, paths or image contents.
       console.log(`desktop-companion: local-preview durationMs=${Math.round(performance.now() - started)} dipSize=${s.rect!.width}x${s.rect!.height} pixels=${size.width}x${size.height} bytes=${png.byteLength}`);
@@ -147,7 +164,7 @@ export function createScreenSelectionController(options: {
     } finally { if (deadline) clearTimeout(deadline); }
   }
   const onDisplayChange = (): void => { if (live) { finish(); report('Display configuration changed. Selection was cancelled.'); } };
-  const handlers = { ready: onReady, select: onSelect, confirm: onConfirm, cancel: onCancel };
+  const handlers = { ready: onReady, select: onSelect, confirm: onConfirm, cancel: onCancel, vision: onVision };
   if (options.enabled) {
     for (const key of Object.keys(channels) as Array<keyof typeof channels>) ipcMain.on(channels[key], handlers[key]);
     screen.on('display-added', onDisplayChange);

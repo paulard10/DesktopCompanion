@@ -1,3 +1,4 @@
+import type { OfflineVisionAction, OfflineVisionNotice } from './offlineVision.js';
 export interface SelectionRect { x: number; y: number; width: number; height: number }
 export interface SelectionDisplay { id: number; bounds: SelectionRect; scaleFactor: number }
 export interface SelectionViewport { width: number; height: number; dpr: number }
@@ -6,12 +7,13 @@ export const SCREEN_SELECTION = Object.freeze({ minDip: 16, maxSide: 4096, maxDi
 export type SelectionPhase = 'SELECTING' | 'AWAITING_CAPTURE_CONFIRMATION' | 'CAPTURING' | 'PREVIEWING';
 export type SelectionNotice = { sessionId: string; displayId: number; phase: SelectionPhase;
   width: number; height: number; rect?: SelectionRect; message?: string;
-  image?: { png: Uint8Array; width: number; height: number } };
+  image?: { png: Uint8Array; width: number; height: number }; vision?: OfflineVisionNotice };
 export interface ScreenSelectionBridge {
   ready: () => void;
   select: (sessionId: string, displayId: number, rect: SelectionRect) => void;
   confirm: (sessionId: string, displayId: number) => void;
   cancel: (sessionId: string) => void;
+  vision: (action: OfflineVisionAction) => void;
   onNotice: (listener: (notice: SelectionNotice) => void) => () => void;
 }
 /** Viewport is a consistency check, never authority to change the trusted area. */

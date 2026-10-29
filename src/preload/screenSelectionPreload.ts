@@ -9,6 +9,7 @@ const bridge: ScreenSelectionBridge = {
   select(id, display, rect) { ipcRenderer.send('selection:select', id, display, rect); },
   confirm(id, display) { ipcRenderer.send('selection:confirm', id, display); },
   cancel(id) { ipcRenderer.send('selection:cancel', id); },
+  vision(action) { ipcRenderer.send('selection:vision', action); },
   onNotice(listener) {
     const receive = (_event: unknown, notice: SelectionNotice): void => { listener(notice); };
     ipcRenderer.on('selection:notice', receive);

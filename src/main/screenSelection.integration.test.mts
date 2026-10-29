@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { Module, createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { makePng } from './visionFixtures.test-support.mts';
 
 class Contents extends EventEmitter {
   mainFrame={parent:null as unknown,url:''}; sent:any[]=[];
@@ -45,10 +46,10 @@ const electron={BrowserWindow:Win,ipcMain:ipc,screen,
   desktopCapturer:{getSources:async(options:any)=>{requests.push(options);return acquire();}},
   dialog:{showMessageBox:async(options:any)=>{messages.push(options);}},session:{fromPartition:()=>isolated}};
 const require=createRequire(import.meta.url),originalLoad=(Module as any)._load;
-let createScreenSelectionController:any,SELECTION_CSP:string;
+let createScreenSelectionController:any,SELECTION_CSP:string,SELECTION_PAGE:string;
 try {
   (Module as any)._load=function(id:string,...args:any[]){return id==='electron'?electron:originalLoad.call(this,id,...args);};
-  ({createScreenSelectionController,SELECTION_CSP}=require('../../dist/main/screenSelectionWindow.js'));
+  ({createScreenSelectionController,SELECTION_CSP,SELECTION_PAGE}=require('../../dist/main/screenSelectionWindow.js'));
 } finally {(Module as any)._load=originalLoad;}
 const rect={x:20,y:30,width:40,height:20};
 const settle=async()=>{for(let i=0;i<8;i++)await new Promise(r=>setImmediate(r));};
@@ -172,4 +173,55 @@ test('no persistent, clipboard, microphone, provider or screen-stream capabiliti
   const source=readFileSync(new URL('./screenSelectionWindow.ts',import.meta.url),'utf8');
   for(const forbidden of ['writeFile','clipboard','getDisplayMedia','getUserMedia','QwenProvider','qwenProvider','safeStorage','persist:screen'])assert.equal(source.includes(forbidden),false,forbidden);
   const policy=readFileSync(new URL('../shared/csp.ts',import.meta.url),'utf8');assert.equal(policy.includes('blob:'),false);
+});
+
+// M3.4b.2: use the ACTUAL selection/crop/controller/IPC boundary, synthetic pixels only.
+function enableVisionCrop(){acquire=async()=>[{display_id:'7',thumbnail:image(250,150,{crop:(r:any)=>image(r.width,r.height,{
+  toPNG:()=>makePng(r.width,r.height,Buffer.alloc((r.width*4+1)*r.height)),
+})})}];}
+test('offline feature stays unavailable without an explicitly captured preview',async t=>{
+  const f=fixture(t);f.begin();f.emit('vision',{type:'edit',sessionId:f.notice().sessionId,question:'Hi',revision:2,scenario:'success'});
+  assert.equal(f.notice().vision,undefined);assert.equal(requests.length,0);
+  f.select();assert.equal(f.notice().vision,undefined);assert.equal(requests.length,0);
+});
+test('production registers no vision IPC and exposes no captured session',t=>{
+  const f=fixture(t,false);f.c.start();assert.equal(ipc.listenerCount('selection:vision'),0);assert.equal(windows.length,0);
+});
+test('canonical cropped pixels are owned in main; question IPC cannot supply another image',async t=>{
+  const f=fixture(t);enableVisionCrop();f.begin();f.select();f.confirm();await settle();
+  const n=f.notice(), id=n.sessionId;assert.equal(n.phase,'PREVIEWING');assert.equal(n.vision.phase,'editing');
+  assert.equal(n.image.width,50);assert.equal(n.image.height,26);const imageId=n.vision.imageId;
+  f.emit('vision',{type:'edit',sessionId:id,question:'Exact question',revision:2,scenario:'success'});
+  f.emit('vision',{type:'review',sessionId:id,question:'Exact question',revision:2,scenario:'success',bytes:Buffer.alloc(20)});
+  assert.equal(f.notice().vision.phase,'editing');
+  f.emit('vision',{type:'review',sessionId:id,question:'Exact question',revision:2,scenario:'success'});
+  assert.equal(f.notice().vision.phase,'review');assert.equal(f.notice().vision.imageId,imageId);
+  assert.equal(f.notice().image,undefined);assert.equal(requests.length,1);
+  const token=f.notice().vision.token;
+  f.emit('vision',{type:'run',sessionId:id,revision:2,token});f.emit('vision',{type:'run',sessionId:id,revision:2,token});
+  await new Promise(r=>setTimeout(r,450));assert.equal(f.notice().vision.phase,'result');assert.equal(requests.length,1);
+  assert.equal(f.win().webContents.sent.filter(n=>n.payload.vision?.phase==='running').length,1);
+});
+test('vision IPC rejects foreign sender/frame/URL, stale ID and extra arguments',async t=>{
+  const f=fixture(t);enableVisionCrop();f.begin();f.select();f.confirm();await settle();const id=f.notice().sessionId;
+  const action={type:'edit',sessionId:id,question:'No',revision:2,scenario:'success'},count=f.win().webContents.sent.length;
+  for(const event of [{sender:{},senderFrame:f.event().senderFrame},{...f.event(),senderFrame:{parent:null,url:SELECTION_PAGE}},
+    {...f.event(),senderFrame:{parent:{},url:SELECTION_PAGE}}])ipc.emit('selection:vision',event,action);
+  f.emit('vision',{...action,sessionId:'old'});f.emit('vision',action,'extra');
+  assert.equal(f.win().webContents.sent.length,count);
+});
+test('discard during mock prevents publication, and replacement has no old question or permission',async t=>{
+  const f=fixture(t);enableVisionCrop();f.begin();f.select();f.confirm();await settle();const id=f.notice().sessionId;
+  for(const type of ['edit','review'])f.emit('vision',{type,sessionId:id,question:'Secret fixture',revision:2,scenario:'success'});
+  const token=f.notice().vision.token;f.emit('vision',{type:'run',sessionId:id,revision:2,token});
+  const old=f.win();f.emit('cancel',id);const count=old.webContents.sent.length;
+  f.begin();f.select();f.confirm();await settle();const next=f.notice();
+  assert.equal(next.vision.question,'');assert.notEqual(next.sessionId,id);assert.equal(next.vision.token,undefined);
+  await new Promise(r=>setTimeout(r,450));assert.equal(old.webContents.sent.length,count);assert.equal(f.notice().vision.phase,'editing');
+});
+test('renderer loss and Quit abort mock and remove vision listeners',async t=>{
+  const f=fixture(t);enableVisionCrop();f.begin();f.select();f.confirm();await settle();const id=f.notice().sessionId;
+  for(const type of ['edit','review'])f.emit('vision',{type,sessionId:id,question:'Hi',revision:2,scenario:'timeout'});
+  f.emit('vision',{type:'run',sessionId:id,revision:2,token:f.notice().vision.token});
+  f.win().webContents.emit('render-process-gone');assert.equal(f.c.active(),false);f.c.destroy();assert.equal(ipc.listenerCount('selection:vision'),0);
 });
