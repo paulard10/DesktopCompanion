@@ -24,6 +24,8 @@ export interface PilotReceipt {
   inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; reasoningTokens: number | null;
   finishReason: 'stop' | 'length' | 'content_filter' | 'tool_calls' | 'function_call' | null;
   elapsedMs: number | null; errorCategory: string | null; answer: string | null;
+  returnedModel?: string | null; postDurationMs?: number | null;
+  providerErrorCode?: string | null; providerErrorCategory?: 'thinking-setting' | 'completion-limit' | 'other' | null;
   terminal: PilotTerminal | null; complete: boolean;
 }
 export interface PilotEvidence {
@@ -34,6 +36,8 @@ export interface PilotEvidence {
   parsed(): void;
 }
 const fail = (): never => { throw new Error('Invalid pilot receipt.'); };
+const OPTIONAL_FIELDS = ['returnedModel','postDurationMs','providerErrorCode','providerErrorCategory'];
+const safeLabel = (value: unknown): boolean => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value) && !/^(?:sk-|Bearer)/i.test(value);
 function directory(): void {
   fs.mkdirSync(RECEIPT_DIRECTORY, { recursive: true });
   if (!fs.lstatSync(RECEIPT_DIRECTORY).isDirectory() || fs.lstatSync(RECEIPT_DIRECTORY).isSymbolicLink() ||
@@ -59,13 +63,15 @@ function validate(r: PilotReceipt): void {
       (r.states.includes('HTTP_RESPONSE_RECEIVED') && r.transportInvocations !== 1) ||
       (r.scopeSha256 !== null && !/^[a-f0-9]{64}$/.test(r.scopeSha256)) ||
       (r.authorizationConsumed && r.scopeSha256 === null) ||
-      (!r.authorizationConsumed && r.scopeSha256 !== null) ||
       (r.httpStatus !== null && (!Number.isInteger(r.httpStatus) || r.httpStatus < 100 || r.httpStatus > 599 || !r.states.includes('HTTP_RESPONSE_RECEIVED'))) ||
       (r.providerRequestId !== null && !/^(?:chatcmpl-)?[a-f0-9-]{8,80}$/i.test(r.providerRequestId)) ||
       [r.inputTokens,r.outputTokens,r.totalTokens,r.reasoningTokens].some(v=>v !== null && count(v) === null) ||
       (r.finishReason !== null && !['stop','length','content_filter','tool_calls','function_call'].includes(r.finishReason)) ||
       (r.elapsedMs !== null && (!Number.isFinite(r.elapsedMs) || r.elapsedMs < 0 || r.elapsedMs > 120_000)) ||
       (r.errorCategory !== null && !ERRORS.includes(r.errorCategory)) || (r.answer !== null && !safeText(r.answer)) ||
+      [r.returnedModel,r.providerErrorCode].some(v=>v !== undefined && v !== null && !safeLabel(v)) ||
+      (r.postDurationMs !== undefined && r.postDurationMs !== null && (!Number.isFinite(r.postDurationMs) || r.postDurationMs < 0 || r.postDurationMs > 120_000)) ||
+      (r.providerErrorCategory !== undefined && r.providerErrorCategory !== null && !['thinking-setting','completion-limit','other'].includes(r.providerErrorCategory)) ||
       (r.terminal !== null && !TERMINALS.includes(r.terminal)) || typeof r.complete !== 'boolean' ||
       (r.complete !== (r.state === 'RESULT_RECORDED' && r.terminal !== null)) ||
       (!r.complete && r.terminal !== null) ||
@@ -94,7 +100,8 @@ export function readPilotReceipt(id: string): { status: 'valid'; receipt: PilotR
     const r = JSON.parse(fs.readFileSync(file, 'utf8')) as PilotReceipt;
     validate(r); if (r.testId !== id) return { status: 'corrupt' };
     // Reject extra fields: diagnostics can never turn into a general-purpose log.
-    if (Object.keys(r).sort().join() !== Object.keys(blank(id, r.domain)).sort().join()) return { status: 'corrupt' };
+    const required = Object.keys(blank(id,r.domain)).filter(k=>!OPTIONAL_FIELDS.includes(k));
+    if (required.some(k=>!Object.hasOwn(r,k)) || Object.keys(r).some(k=>!required.includes(k)&&!OPTIONAL_FIELDS.includes(k))) return { status: 'corrupt' };
     return { status: 'valid', receipt: r };
   } catch (e) { return { status: (e as NodeJS.ErrnoException)?.code === 'ENOENT' ? 'missing' : 'corrupt' }; }
 }
@@ -102,7 +109,8 @@ function blank(id: string, domain: PilotReceipt['domain']): PilotReceipt {
   return { version: 1, testId: id, domain, pilotId: 'synthetic-384x256-8275b81d', expectedModel: 'qwen3.7-plus',
     endpointId: 'singapore-workspace-chat-completions', authorizationConsumed: false, scopeSha256: null, transportInvocations: 0,
     state: 'NOT_STARTED', states: ['NOT_STARTED'], httpStatus: null, providerRequestId: null, inputTokens: null, outputTokens: null,
-    totalTokens: null, reasoningTokens: null, finishReason: null, elapsedMs: null, errorCategory: null, answer: null, terminal: null, complete: false };
+    totalTokens: null, reasoningTokens: null, finishReason: null, elapsedMs: null, errorCategory: null, answer: null, terminal: null, complete: false,
+    returnedModel: null, postDurationMs: null, providerErrorCode: null, providerErrorCategory: null };
 }
 function claim(file: string): void {
   const fd = fs.openSync(file,'wx',0o600);
@@ -119,9 +127,13 @@ export function createPilotReceipt(domain: PilotReceipt['domain'], testId = rand
   }
   return {
     testId,
+    bindScope(scope: string): void {
+      if (r.state !== 'NOT_STARTED' || r.scopeSha256 !== null || !/^[a-f0-9]{64}$/.test(scope)) fail();
+      r.scopeSha256 = scope; atomic(r); // Expected fingerprint before authorization, not permission.
+    },
     preflight(): void { if (r.state === 'NOT_STARTED') advance('PREFLIGHT_PASSED'); },
     consume(id: string, scope: string): void {
-      if (r.state !== 'PREFLIGHT_PASSED' || !UUID.test(id) || !/^[a-f0-9]{64}$/.test(scope)) fail();
+      if (r.state !== 'PREFLIGHT_PASSED' || !UUID.test(id) || !/^[a-f0-9]{64}$/.test(scope) || (r.scopeSha256 !== null && r.scopeSha256 !== scope)) fail();
       // Exclusive durable claim across processes. Never a reusable authorization token.
       claim(location(id, '.consumed'));
       r.authorizationConsumed = true; r.scopeSha256 = scope; advance('AUTHORIZATION_CONSUMED');
@@ -150,6 +162,10 @@ export function createPilotReceipt(domain: PilotReceipt['domain'], testId = rand
       r.inputTokens = count(d.usage?.promptTokens); r.outputTokens = count(d.usage?.completionTokens); r.totalTokens = count(d.usage?.totalTokens);
       r.reasoningTokens = count(d.reasoningTokens); r.finishReason = d.finishReason as PilotReceipt['finishReason'];
       r.elapsedMs = typeof d.totalDurationMs === 'number' ? Math.min(120_000, Math.max(0, d.totalDurationMs)) : null;
+      r.returnedModel = safeLabel(d.returnedModel) ? d.returnedModel : null;
+      r.providerErrorCode = safeLabel(d.providerErrorCode) ? d.providerErrorCode : null;
+      r.providerErrorCategory = d.providerErrorCategory;
+      r.postDurationMs = typeof d.postDurationMs === 'number' ? Math.min(120_000,Math.max(0,d.postDurationMs)) : null;
       r.errorCategory = result.ok ? null : ERRORS.includes(result.code) ? result.code : 'collector';
       r.answer = safeText(d.responseText) ? d.responseText : null;
       if (result.ok && r.state === 'RESPONSE_PARSED' && r.answer?.trim()) r.terminal = 'SUCCEEDED';

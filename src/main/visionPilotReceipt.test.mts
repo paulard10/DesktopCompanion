@@ -25,6 +25,23 @@ test('receipt records the exact causal state sequence, validated HTTP answer and
   assert.equal(r.terminal,'SUCCEEDED');assert.equal(r.transportInvocations,1);assert.equal(r.inputTokens,248);assert.equal(r.outputTokens,24);
   assert.equal(r.answer,'OFFLINE FIXTURE answer');assert.equal(r.complete,true);assert.equal(classifyReceipt(result),'SUCCEEDED');
 });
+test('expected request scope is durable before authorization and cannot be substituted',()=>{
+  const j=journal();j.bindScope('1'.repeat(64));const initial=readPilotReceipt(j.testId).receipt;
+  assert.equal(initial.scopeSha256,'1'.repeat(64));assert.equal(initial.state,'NOT_STARTED');assert.equal(initial.authorizationConsumed,false);
+  j.preflight();assert.throws(()=>j.consume(id(),'2'.repeat(64)));assert.equal(readPilotReceipt(j.testId).receipt.authorizationConsumed,false);
+  j.consume(id(),'1'.repeat(64));assert.equal(readPilotReceipt(j.testId).receipt.authorizationConsumed,true);
+});
+test('safe returned model, HTTP error category and post duration survive independent receipt readback',()=>{
+  const j=journal();submitted(j);j.response(diagnostics({httpStatus:400}));
+  j.finish({ok:false,code:'invalid',message:'fixed'},diagnostics({httpStatus:400,responseText:null,returnedModel:'qwen3.7-plus',providerErrorCode:'InvalidParameter',providerErrorCategory:'thinking-setting'}));
+  const r=readPilotReceipt(j.testId).receipt;assert.equal(r.terminal,'HTTP_ERROR');assert.equal(r.returnedModel,'qwen3.7-plus');
+  assert.equal(r.providerErrorCode,'InvalidParameter');assert.equal(r.providerErrorCategory,'thinking-setting');assert.equal(r.postDurationMs,10);
+});
+test('historical v1 receipts remain readable without newly optional metadata',()=>{
+  const j=journal(),file=path.join(RECEIPT_DIRECTORY,j.testId+'.json'),r=JSON.parse(fs.readFileSync(file,'utf8'));
+  for(const field of ['returnedModel','postDurationMs','providerErrorCode','providerErrorCategory'])delete r[field];
+  fs.writeFileSync(file,JSON.stringify(r));assert.equal(readPilotReceipt(j.testId).status,'valid');
+});
 test('transport count changes only after the dispatch function was called',()=>{
   const j=journal();j.preflight();j.consume(id(),'b'.repeat(64));let calls=0;
   assert.equal(readPilotReceipt(j.testId).receipt.transportInvocations,0);

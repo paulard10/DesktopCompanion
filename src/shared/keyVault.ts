@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export type KeySaveResult = 'saved' | 'unavailable' | 'rejected';
+export type CredentialLoadStatus = 'CREDENTIAL_ACCESS_UNVERIFIED' | 'AVAILABLE' | 'SECURE_STORAGE_UNAVAILABLE'
+  | 'CREDENTIAL_ENTRY_MISSING' | 'CREDENTIAL_LOOKUP_ERROR' | 'CREDENTIAL_RECORD_INVALID';
 
 export interface KeyVault {
   available(): boolean;
@@ -12,6 +14,7 @@ export interface KeyVault {
   present(): boolean;
   load(): Promise<string | null>;
   clear(): void;
+  diagnosticStatus?(): CredentialLoadStatus;
 }
 
 export interface AsyncCipher {
@@ -58,6 +61,7 @@ export function createMemoryVault(encryptionAvailable = true): KeyVault {
 /** Ciphertext file. `decrypt` may read an older blob and ask for it to be rewritten. */
 export function createFileVault(filePath: string, cipher: AsyncCipher): KeyVault {
   let encryption: boolean | null = null;
+  let loadStatus: CredentialLoadStatus = 'CREDENTIAL_ACCESS_UNVERIFIED';
   const ready = async (): Promise<boolean> => {
     if (encryption !== null) {
       return encryption;
@@ -70,6 +74,7 @@ export function createFileVault(filePath: string, cipher: AsyncCipher): KeyVault
     return encryption;
   };
   return {
+    diagnosticStatus: () => loadStatus,
     available(): boolean {
       return encryption === true;
     },
@@ -96,22 +101,36 @@ export function createFileVault(filePath: string, cipher: AsyncCipher): KeyVault
       return encryption === true && fs.existsSync(filePath);
     },
     async load(): Promise<string | null> {
-      if (!(await ready()) || !fs.existsSync(filePath)) {
+      if (!(await ready())) {
+        loadStatus = 'SECURE_STORAGE_UNAVAILABLE';
+        return null;
+      }
+      let encrypted: Buffer;
+      try {
+        const metadata = fs.lstatSync(filePath);
+        if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size === 0 || metadata.size > 16_384) {
+          loadStatus = 'CREDENTIAL_RECORD_INVALID'; return null;
+        }
+        encrypted = fs.readFileSync(filePath);
+      } catch (error) {
+        loadStatus = (error as NodeJS.ErrnoException)?.code === 'ENOENT' ? 'CREDENTIAL_ENTRY_MISSING' : 'CREDENTIAL_LOOKUP_ERROR';
         return null;
       }
       try {
-        const decoded = await cipher.decrypt(fs.readFileSync(filePath));
+        const decoded = await cipher.decrypt(encrypted);
         if (!validateApiKey(decoded.result)) {
-          fs.rmSync(filePath, { force: true });
+          loadStatus = 'CREDENTIAL_RECORD_INVALID';
           return null;
         }
         if (decoded.shouldReEncrypt) {
           const next = await cipher.encrypt(decoded.result);
           fs.writeFileSync(filePath, next);
         }
-        return decoded.result;
+        loadStatus = 'AVAILABLE'; return decoded.result;
       } catch {
-        fs.rmSync(filePath, { force: true });
+        // Failure may mean another crypto profile, temporary OS failure or I/O.
+        // Never erase ciphertext as a side effect of a read/decrypt failure.
+        loadStatus = 'CREDENTIAL_LOOKUP_ERROR';
         return null;
       }
     },
