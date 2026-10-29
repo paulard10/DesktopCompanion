@@ -1,8 +1,19 @@
-/** Prompt 107: default dummy-only. A real launch requires the explicit one-use mode. */
+/** Prompts 107/110: real checks require a distinct, explicit single-use local scope. */
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {spawn}from'node:child_process';import{fileURLToPath,pathToFileURL}from'node:url';
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const diagnostics=path.join(project,'.local-vision-diagnostics');
+const scopes=Object.freeze({
+ '107':Object.freeze({realFlag:'--real-once-107',dryFlag:'--dummy',mode:'real107',resultMode:'LOCAL_ONLY_107',
+  dryFile:'credential107-dry-run.json',launchClaim:'credential107-real-check.consumed',childClaim:'credential107-real-child.consumed',resultFile:'credential107-result.json'}),
+ '110':Object.freeze({realFlag:'--real-once-110',dryFlag:'--dummy-110',mode:'real110',resultMode:'LOCAL_ONLY_110',
+  dryFile:'credential110-dry-run.json',launchClaim:'credential110-real-check.consumed',childClaim:'credential110-real-child.consumed',resultFile:'credential110-result.json'}),
+});
+/** Non-secret invocation metadata only; not an inference permit or secret-access API. */
+export function localCheckScope(task){
+ if(task!=='107'&&task!=='110')throw Error('Unsupported local-check scope');
+ return scopes[task];
+}
 const outcomes=new Set(['AVAILABLE_LOCALLY','CREDENTIAL_ENTRY_MISSING','CREDENTIAL_DECRYPTION_FAILED','SECURE_STORAGE_UNAVAILABLE',
  'CREDENTIAL_NAMESPACE_MISMATCH','APP_CONTEXT_INVALID','PROVIDER_CONFIGURATION_INCOMPLETE','CREDENTIAL_READ_ERROR','UNVERIFIED_SAFE_STOP']);
 function safeResult(value){
@@ -55,28 +66,32 @@ export async function runDummyLocalCheck(){
  }finally{const cleaned=cleanup(owned);if(result)result.cleanup=cleaned;}
  return result;
 }
-async function runRealOnce107(){
- const dry=JSON.parse(fs.readFileSync(path.join(diagnostics,'credential107-dry-run.json'),'utf8'));
+async function runRealOnce(task){
+ const scope=localCheckScope(task);
+ const dry=JSON.parse(fs.readFileSync(path.join(diagnostics,scope.dryFile),'utf8'));
  if(dry.mode!=='DUMMY_ONLY'||dry.pass!==true||dry.cleanup!==true)throw Error('Dummy preflight required');
  if(fs.lstatSync(diagnostics).isSymbolicLink()||fs.realpathSync(diagnostics)!==diagnostics)throw Error('Diagnostic path refused');
  // A durable LOCAL-ONLY claim; it is never a live-inference authorization.
- const claim=fs.openSync(path.join(diagnostics,'credential107-real-check.consumed'),'wx',0o600);fs.closeSync(claim);
+ const claim=fs.openSync(path.join(diagnostics,scope.launchClaim),'wx',0o600);fs.closeSync(claim);
  const owned=ownRoot();let result;
- try{result=await locked(owned.root,'real107');}
+ try{result=await locked(owned.root,scope.mode);}
  catch{result=safeResult({outcome:'UNVERIFIED_SAFE_STOP',retrievalAttempted:null});}
  finally{const cleaned=cleanup(owned);if(result)result.temporaryCleanup=cleaned;}
- fs.writeFileSync(path.join(diagnostics,'credential107-result.json'),JSON.stringify({mode:'LOCAL_ONLY_107',...result}),{flag:'wx',mode:0o600});
+ fs.writeFileSync(path.join(diagnostics,scope.resultFile),JSON.stringify({mode:scope.resultMode,...result}),{flag:'wx',mode:0o600});
  return result;
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  try{
   if(process.argv.length!==3)throw Error('Explicit mode required');
-  if(process.argv[2]==='--dummy'){
+  if(process.argv[2]==='--dummy'||process.argv[2]==='--dummy-110'){
+   const scope=localCheckScope(process.argv[2]==='--dummy'?'107':'110');
    const result=await runDummyLocalCheck();
    if(!result.pass||!result.cleanup)throw Error('Dummy check failed');
-   fs.writeFileSync(path.join(diagnostics,'credential107-dry-run.json'),JSON.stringify(result),{flag:'wx',mode:0o600});
+   fs.writeFileSync(path.join(diagnostics,scope.dryFile),JSON.stringify(result),{flag:'wx',mode:0o600});
    console.log(JSON.stringify(result));
-  }else if(process.argv[2]==='--real-once-107')console.log(JSON.stringify(await runRealOnce107()));
+  }else if(process.argv[2]==='--real-once-107'||process.argv[2]==='--real-once-110'){
+   console.log(JSON.stringify(await runRealOnce(process.argv[2]==='--real-once-107'?'107':'110')));
+  }
   else throw Error('Invalid mode');
  }catch{console.error('Local credential check stopped safely. No retry is authorized.');process.exitCode=1;}
 }

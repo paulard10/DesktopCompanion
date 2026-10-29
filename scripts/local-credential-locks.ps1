@@ -8,8 +8,9 @@ try {
   if ([IO.Path]::GetDirectoryName($taskRoot) -ne $taskTemp -or -not [IO.Path]::GetFileName($taskRoot).StartsWith('desktop-companion-local-check-')) { throw 'Invalid control root' }
   if ((Get-Item -LiteralPath $taskRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Invalid control root' }
   $taskControl = Get-Content -LiteralPath (Join-Path $taskRoot 'control.json') -Raw | ConvertFrom-Json
-  if ($taskControl.mode -notin @('dummy','wrong-dummy','real107')) { throw 'Invalid mode' }
-  $taskProfile = if ($taskControl.mode -eq 'real107') { Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'desktop-companion' } else { Join-Path $taskRoot 'profile-a' }
+  if ($taskControl.mode -notin @('dummy','wrong-dummy','real107','real110')) { throw 'Invalid mode' }
+  $taskIsReal = $taskControl.mode -in @('real107','real110')
+  $taskProfile = if ($taskIsReal) { Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'desktop-companion' } else { Join-Path $taskRoot 'profile-a' }
   if (-not (Test-Path -LiteralPath (Join-Path $taskProfile 'Local State') -PathType Leaf)) { throw 'No existing crypto profile' }
   foreach ($taskDir in @($taskProfile,(Join-Path $taskProfile 'companion'))) {
     if ((Test-Path -LiteralPath $taskDir) -and ((Get-Item -LiteralPath $taskDir).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Reparse directory refused' }
@@ -29,7 +30,7 @@ try {
   $taskStart = New-Object Diagnostics.ProcessStartInfo
   $taskStart.FileName = Join-Path $PSScriptRoot '..\node_modules\electron\dist\electron.exe'
   $taskStart.Arguments = '"' + (Join-Path $taskRoot 'normal-package') + '"'
-  if ($taskControl.mode -ne 'real107') {
+  if (-not $taskIsReal) {
     $taskSelected = if ($taskControl.mode -eq 'wrong-dummy') { 'profile-b' } else { 'profile-a' }
     $taskStart.Arguments += ' "--user-data-dir=' + (Join-Path $taskRoot $taskSelected) + '"'
   }

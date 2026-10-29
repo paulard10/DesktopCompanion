@@ -1,8 +1,10 @@
-// Fixed, windowless diagnostic. Real mode is invoked only by Prompt 107's locked supervisor.
+// Fixed, windowless diagnostic. Each explicitly approved local check has separate claims.
 const {app}=require('electron'),electron=require('electron');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const project=path.resolve(__dirname,'..'),root=process.env.DESKTOP_COMPANION_LOCAL_CHECK_ROOT;
 const mode=process.env.DESKTOP_COMPANION_LOCAL_CHECK_MODE;
+const realScope=mode==='real107'?{launchClaim:'credential107-real-check.consumed',childClaim:'credential107-real-child.consumed'}
+ :mode==='real110'?{launchClaim:'credential110-real-check.consumed',childClaim:'credential110-real-child.consumed'}:null;
 const temporary=fs.realpathSync(os.tmpdir());
 let emitted=false;
 const outcomes=new Set(['AVAILABLE_LOCALLY','CREDENTIAL_ENTRY_MISSING','CREDENTIAL_DECRYPTION_FAILED','SECURE_STORAGE_UNAVAILABLE',
@@ -18,17 +20,17 @@ function emit(result){
 console.log=console.warn=console.error=()=>{};
 process.on('uncaughtException',()=>emit({outcome:'UNVERIFIED_SAFE_STOP'}));
 process.on('unhandledRejection',()=>emit({outcome:'UNVERIFIED_SAFE_STOP'}));
-if(!root||!['prepare-dummy','dummy','wrong-dummy','real107'].includes(mode)||path.dirname(fs.realpathSync(root))!==temporary||
+if(!root||!['prepare-dummy','dummy','wrong-dummy','real107','real110'].includes(mode)||path.dirname(fs.realpathSync(root))!==temporary||
  !path.basename(root).startsWith('desktop-companion-local-check-'))app.exit(2);
 else {
  for(const flag of ['disable-background-networking','disable-component-update','disable-domain-reliability','disable-sync','no-pings','disable-crash-reporter'])app.commandLine.appendSwitch(flag);
  const guards=require('./local-credential-guards.cjs').installLocalOnlyGuards(electron);
- const expectedProfile=mode==='real107'?path.join(app.getPath('appData'),'desktop-companion'):path.join(root,'profile-a');
+ const expectedProfile=realScope?path.join(app.getPath('appData'),'desktop-companion'):path.join(root,'profile-a');
  const expected={appName:'desktop-companion',userData:expectedProfile,sessionData:expectedProfile};
  const {checkPilotCredentialContext,credentialFiles}=require(path.join(project,'dist/main/pilotCredentialContext.js'));
  const files=credentialFiles(expectedProfile);
  // No setName/setPath: package startup must naturally match the ordinary dev identity.
- if(mode==='real107'&&!fs.existsSync(path.join(project,'.local-vision-diagnostics/credential107-real-check.consumed')))app.exit(2);
+ if(realScope&&!fs.existsSync(path.join(project,'.local-vision-diagnostics',realScope.launchClaim)))app.exit(2);
  else app.whenReady().then(async()=>{
   let contextMatched=false,encryptionReady=false,retrievalAttempted=false;
   const finish=outcome=>emit({outcome,retrievalAttempted,contextMatched,encryptionReady,...guards.status()});
@@ -52,9 +54,9 @@ else {
   encryptionReady=await electron.safeStorage.isAsyncEncryptionAvailable();
   if(!encryptionReady)return finish('SECURE_STORAGE_UNAVAILABLE');
   if(!guards.status().guardReady)return finish('UNVERIFIED_SAFE_STOP');
-  if(mode==='real107'){
+  if(realScope){
    // A second child cannot retrieve again even if the supervisor is accidentally rerun.
-   const claim=fs.openSync(path.join(project,'.local-vision-diagnostics/credential107-real-child.consumed'),'wx',0o600);fs.closeSync(claim);
+   const claim=fs.openSync(path.join(project,'.local-vision-diagnostics',realScope.childClaim),'wx',0o600);fs.closeSync(claim);
   }
   const {createLocalCredentialCheck}=require(path.join(project,'dist/main/localCredentialCheck.js'));
   const check=createLocalCredentialCheck({app,expected,readOnlyAvailability:async file=>{

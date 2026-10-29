@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';import test,{after}from'node:test';
-import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import{createRequire}from'node:module';
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import{createRequire}from'node:module';import{spawnSync}from'node:child_process';
 import{checkCredentialReadOnly}from'../shared/keyVault.ts';
 const require=createRequire(import.meta.url);
 const {createLocalCredentialCheck,providerConfiguredReadOnly}=require('../../dist/main/localCredentialCheck.js');
-const {runDummyLocalCheck}=await import('../../scripts/local-credential-check.mjs');
+const {runDummyLocalCheck,localCheckScope}=await import('../../scripts/local-credential-check.mjs');
 const temporary=fs.realpathSync(os.tmpdir()),root=fs.mkdtempSync(path.join(temporary,'desktop-companion-local-unit-'));
 after(()=>{const target=fs.realpathSync(root);assert.equal(path.dirname(target),temporary);assert.ok(path.basename(target).startsWith('desktop-companion-local-unit-'));fs.rmSync(target,{recursive:true,force:true});});
 const dummy='TEST_ONLY_NOT_A_REAL_API_KEY';let sequence=0;
@@ -84,6 +84,28 @@ test('real launch is never in npm test and has exclusive separate local-only cla
  const source=fs.readFileSync('scripts/local-credential-check.mjs','utf8'),worker=fs.readFileSync('scripts/local-credential-worker.cjs','utf8');
  assert.match(source,/credential107-real-check\.consumed/);assert.match(worker,/credential107-real-child\.consumed/);assert.match(source,/flag:'wx'/);
  const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));assert.equal(pkg.scripts.test.includes('--real-once-107'),false);
+ assert.equal(pkg.scripts.test.includes('--real-once-110'),false);
+});
+test('new local approval scope has separate immutable claims, preflight and result; old scope is preserved',()=>{
+ const old=localCheckScope('107'),fresh=localCheckScope('110');
+ assert.equal(old.launchClaim,'credential107-real-check.consumed');assert.equal(old.childClaim,'credential107-real-child.consumed');
+ assert.equal(old.dryFile,'credential107-dry-run.json');assert.equal(old.resultFile,'credential107-result.json');
+ assert.equal(fresh.realFlag,'--real-once-110');assert.equal(fresh.dryFlag,'--dummy-110');assert.equal(fresh.mode,'real110');
+ for(const field of ['launchClaim','childClaim','dryFile','resultFile']){assert.notEqual(fresh[field],old[field]);assert.ok(fresh[field].startsWith('credential110-'));}
+ assert.equal(Object.isFrozen(fresh),true);for(const invalid of ['111','../110',110,null])assert.throws(()=>localCheckScope(invalid));
+});
+test('missing or unsupported CLI mode cannot launch a real diagnostic',()=>{
+ const env:Record<string,string>={};for(const key of ['SystemRoot','WINDIR','TEMP','TMP'])if(process.env[key])env[key]=process.env[key]!;
+ for(const extra of [[],['--real-once-unsupported']]){
+  const r=spawnSync(process.execPath,['scripts/local-credential-check.mjs',...extra],{cwd:process.cwd(),env,shell:false,windowsHide:true,encoding:'utf8',timeout:5000});
+  assert.equal(r.status,1);assert.equal(r.stdout,'');assert.match(r.stderr,/Local credential check stopped safely/);
+ }
+});
+test('fresh supervisor and worker use the same fixed scope without changing userData/sessionData or adding transports',()=>{
+ const worker=fs.readFileSync('scripts/local-credential-worker.cjs','utf8'),supervisor=fs.readFileSync('scripts/local-credential-locks.ps1','utf8');
+ const scope=localCheckScope('110');assert.ok(worker.includes(scope.launchClaim));assert.ok(worker.includes(scope.childClaim));
+ assert.match(supervisor,/@\('real107','real110'\)/);assert.equal(/app\.setPath|app\.setName|qwenVisionTransport|qwenProvider/.test(worker),false);
+ assert.match(supervisor,/\[IO.FileShare\]::Read/);assert.equal(supervisor.includes('WriteAllBytes'),false);
 });
 test('native isolated read-only rehearsal: kernel locks, readiness, recovery, wrong-profile rejection and zero network',
  {skip:process.platform!=='win32',timeout:120000},async()=>{
