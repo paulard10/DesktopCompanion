@@ -1,4 +1,4 @@
-/** Offline only. The development preview uses the closed mock, never HTTP. */
+/** Shared pure builder/normalizer and closed offline executor. Preview stays mock-only. */
 import { validVisionQuestion } from '../shared/offlineVision.js';
 import { chatCompletionsUrl } from '../shared/qwenEndpoint.js';
 import { classifyProviderHttp } from '../shared/providerErrors.js';
@@ -43,14 +43,15 @@ export interface VisionRequestBody {
   messages: [{ role: 'system'; content: string }, { role: 'user'; content: [
     { type: 'text'; text: string }, { type: 'image_url'; image_url: { url: string } },
   ] }];
-  stream: false; enable_thinking: false; max_tokens: number;
+  stream: false; enable_thinking: false; max_tokens?: number; max_completion_tokens?: number;
 }
 export interface BuiltVisionRequest { url: string; body: VisionRequestBody; bodyBytes: number }
 export type VisionBuild = { ok: true; request: BuiltVisionRequest } | Extract<VisionResult, { ok: false }>;
 
 /** Pure request construction. No key, fetch, settings read or send side effect. */
-export function buildVisionRequest(input: unknown): VisionBuild {
+export function buildVisionRequest(input: unknown, profile: 'offline' | 'synthetic-live-test' = 'offline'): VisionBuild {
   try {
+    if (profile !== 'offline' && profile !== 'synthetic-live-test') return failure('invalid-request');
     if (!record(input) || !exactKeys(input, ['endpoint','model','question','image'])) return failure('invalid-request');
     if (input.model !== VISION_MODEL_ID) return failure('unsupported-model');
     const url = typeof input.endpoint === 'string' && input.endpoint.length <= 300 ? chatCompletionsUrl(input.endpoint) : null;
@@ -62,7 +63,8 @@ export function buildVisionRequest(input: unknown): VisionBuild {
     const body: VisionRequestBody = { model: VISION_MODEL_ID, messages: [
       { role: 'system', content: VISION_SYSTEM_PROMPT },
       { role: 'user', content: [{ type: 'text', text: question }, { type: 'image_url', image_url: { url: image } }] },
-    ], stream: false, enable_thinking: false, max_tokens: VISION_LIMITS.outputTokens };
+    ], stream: false, enable_thinking: false,
+      ...(profile === 'synthetic-live-test' ? { max_completion_tokens: 160 } : { max_tokens: VISION_LIMITS.outputTokens }) };
     const bodyBytes = Buffer.byteLength(JSON.stringify(body), 'utf8');
     if (bodyBytes > VISION_LIMITS.jsonBytes) return failure('invalid-request');
     return { ok: true, request: { url, body, bodyBytes } };
