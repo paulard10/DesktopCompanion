@@ -23,6 +23,33 @@ export interface AsyncCipher {
   decrypt(encrypted: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>;
 }
 
+export type LocalCredentialOutcome = 'AVAILABLE_LOCALLY' | 'CREDENTIAL_ENTRY_MISSING'
+  | 'CREDENTIAL_DECRYPTION_FAILED' | 'SECURE_STORAGE_UNAVAILABLE' | 'CREDENTIAL_READ_ERROR'
+  | 'UNVERIFIED_SAFE_STOP';
+
+/** Diagnostic only: returns no secret and NEVER rotates, saves or deletes a record. */
+export async function checkCredentialReadOnly(filePath: string, cipher: Pick<AsyncCipher, 'isAvailable' | 'decrypt'>): Promise<LocalCredentialOutcome> {
+  try { if (!(await cipher.isAvailable())) return 'SECURE_STORAGE_UNAVAILABLE'; }
+  catch { return 'SECURE_STORAGE_UNAVAILABLE'; }
+  let encrypted: Buffer;
+  try {
+    const stat = fs.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0 || stat.size > 16_384) return 'UNVERIFIED_SAFE_STOP';
+    encrypted = fs.readFileSync(filePath);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === 'ENOENT' ? 'CREDENTIAL_ENTRY_MISSING' : 'CREDENTIAL_READ_ERROR';
+  }
+  let decoded: { result: string; shouldReEncrypt: boolean } | undefined;
+  try {
+    try { decoded = await cipher.decrypt(encrypted); }
+    catch { return 'CREDENTIAL_DECRYPTION_FAILED'; }
+    return typeof decoded?.result === 'string' && validateApiKey(decoded.result) ? 'AVAILABLE_LOCALLY' : 'UNVERIFIED_SAFE_STOP';
+  } finally {
+    encrypted.fill(0);
+    decoded = undefined; // Release our reference; JavaScript cannot guarantee physical erasure.
+  }
+}
+
 export function validateApiKey(raw: string): boolean {
   const key = raw.trim();
   return key.length >= 8 && key.length <= 200 && /^[A-Za-z0-9_\-.]+$/.test(key);

@@ -2,13 +2,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { safeStorage } from 'electron';
-import { createFileVault, type KeyVault } from '../shared/keyVault.js';
+import { checkCredentialReadOnly, createFileVault, type AsyncCipher, type KeyVault, type LocalCredentialOutcome } from '../shared/keyVault.js';
 
 const SMOKE_MARKER = 'dummy-key-1';
 
 /** Async OS encryption. A missing or unreadable blob is not a key. */
 export function createSafeCredentialStore(filePath: string): KeyVault {
-  return createFileVault(filePath, {
+  return createFileVault(filePath, safeCipher());
+}
+
+/** Same trusted native cipher, without the ordinary vault's optional re-encryption. */
+export function checkSafeCredentialReadOnly(filePath: string): Promise<LocalCredentialOutcome> {
+  return checkCredentialReadOnly(filePath, safeCipher());
+}
+
+function safeCipher(): AsyncCipher {
+  return {
     isAvailable(): Promise<boolean> {
       return safeStorage.isAsyncEncryptionAvailable();
     },
@@ -19,7 +28,7 @@ export function createSafeCredentialStore(filePath: string): KeyVault {
       const decoded = await safeStorage.decryptStringAsync(encrypted);
       return { result: decoded.result, shouldReEncrypt: decoded.shouldReEncrypt };
     },
-  });
+  };
 }
 
 /**

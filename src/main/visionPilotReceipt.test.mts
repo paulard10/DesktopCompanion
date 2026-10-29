@@ -4,14 +4,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
+import { createVisionPilotTestFixture, VISION_TEST_FILES } from '../../scripts/vision-pilot-test-fixture.mjs';
 const require = createRequire(import.meta.url);
-const { createPilotReceipt, readPilotReceipt, RECEIPT_DIRECTORY, RECEIPT_BYTES } = require('../../dist/main/visionPilotReceipt.js');
-const { classifyReceipt } = await import('../../scripts/vision-pilot-collector.mjs');
-// Only this test's explicitly registered IDs are deleted, never an entire directory.
-const owned = new Set<string>();
-function id() { const value=randomUUID();owned.add(value);return value; }
-after(()=>{ for(const file of fs.existsSync(RECEIPT_DIRECTORY)?fs.readdirSync(RECEIPT_DIRECTORY):[])
-  if([...owned].some(value=>file.startsWith(value+'.')))fs.unlinkSync(path.join(RECEIPT_DIRECTORY,file)); });
+const fixture = createVisionPilotTestFixture();
+const { createPilotReceipt, readPilotReceipt, RECEIPT_DIRECTORY, RECEIPT_BYTES } = require(fixture.modulePath('dist/main/visionPilotReceipt.js'));
+const { classifyReceipt } = await import(fixture.moduleUrl('scripts/vision-pilot-collector.mjs'));
+function id() { return randomUUID(); }
+after(()=>fixture.dispose());
 const journal=()=>createPilotReceipt('offline-http-test',id());
 function diagnostics(patch:any={}) { return {postAttempts:1,httpStatus:200,providerRequestId:'11111111-2222-4333-8444-555555555555',returnedModel:'qwen3.7-plus',
   finishReason:'stop',reasoningTokens:0,usage:{promptTokens:248,completionTokens:24,totalTokens:272},providerErrorCode:null,providerErrorCategory:null,
@@ -99,4 +99,59 @@ test('receipt only projects safe fields, never input keys, images, private error
 test('final result cannot be written twice or inferred from a success-shaped value without parse evidence',()=>{
   const j=journal();j.preflight();j.finish(success,diagnostics({httpStatus:null,responseText:null}));
   assert.equal(readPilotReceipt(j.testId).receipt.terminal,'BLOCKED');assert.throws(()=>j.finish(success,diagnostics()));
+});
+
+test('fixture uses byte-identical runtime files and never redirects the real receipt store',()=>{
+  const real = require('../../dist/main/visionPilotReceipt.js');
+  assert.notEqual(RECEIPT_DIRECTORY, real.RECEIPT_DIRECTORY);
+  assert.equal(RECEIPT_DIRECTORY,path.join(fixture.directory,'.local-vision-diagnostics'));
+  for(const file of VISION_TEST_FILES)assert.ok(fs.readFileSync(fixture.modulePath(file)).equals(fs.readFileSync(path.resolve(file))));
+  assert.throws(()=>fixture.modulePath('../provider-settings.json'));
+});
+
+test('separate test namespaces cannot read or delete one another, even with the same synthetic ID',()=>{
+  const a=createVisionPilotTestFixture(),b=createVisionPilotTestFixture();
+  try {
+    const left=require(a.modulePath('dist/main/visionPilotReceipt.js')),right=require(b.modulePath('dist/main/visionPilotReceipt.js')),sharedId=randomUUID();
+    left.createPilotReceipt('offline-http-test',sharedId);
+    assert.equal(right.readPilotReceipt(sharedId).status,'missing');
+    right.createPilotReceipt('offline-http-test',sharedId);
+    a.dispose();assert.equal(fs.existsSync(a.directory),false);
+    assert.equal(right.readPilotReceipt(sharedId).status,'valid');
+    assert.equal(fs.existsSync(path.join(right.RECEIPT_DIRECTORY,sharedId+'.run')),true);
+  } finally {a.dispose();b.dispose();}
+  assert.equal(fs.existsSync(b.directory),false);
+});
+
+test('concurrent independent processes cannot both consume one synthetic authorization',async()=>{
+  const isolated=createVisionPilotTestFixture(),grant=randomUUID();
+  // Fixed source, synthetic IDs only. No driver, provider configuration or secret import.
+  const code=`const fs=require('node:fs'),net=require('node:net');let attempts=0;
+    const deny=()=>{attempts++;throw Error('Offline only');};globalThis.fetch=deny;
+    for(const m of ['node:http','node:https'])for(const k of ['get','request'])require(m)[k]=deny;
+    net.connect=net.createConnection=net.Socket.prototype.connect=deny;require('node:tls').connect=deny;
+    const {createPilotReceipt}=require(process.argv[1]);
+    const j=createPilotReceipt('offline-http-test',process.argv[2]);j.preflight();let claimed=false,rejection=null;
+    try{j.consume(process.argv[3],'a'.repeat(64));claimed=true;}catch(error){if(error.code!=='EEXIST')throw error;rejection='duplicate-claim';}
+    fs.writeSync(1,JSON.stringify({claimed,rejection,networkAttempts:attempts}));`;
+  const run=(testId:string)=>new Promise<any>((resolve,reject)=>{
+    const env:Record<string,string>={};for(const key of ['SystemRoot','WINDIR','TEMP','TMP'])if(process.env[key])env[key]=process.env[key]!;
+    const child=spawn(process.execPath,['-e',code,isolated.modulePath('dist/main/visionPilotReceipt.js'),testId,grant],{cwd:isolated.directory,env,shell:false,windowsHide:true,stdio:['ignore','pipe','pipe']});
+    let output='',invalid=false;const deadline=setTimeout(()=>{invalid=true;isolated.markUnclosed();child.kill();},10000);
+    child.stdout.on('data',b=>{if(output.length+b.length>1024)invalid=true;else output+=b.toString();});child.stderr.on('data',()=>{invalid=true;});
+    child.once('error',()=>{clearTimeout(deadline);reject(Error('Synthetic claim child unavailable'));});
+    child.once('close',exit=>{clearTimeout(deadline);if(exit!==0||invalid)return reject(Error('Synthetic claim child failed'));
+      try{resolve(JSON.parse(output));}catch{reject(Error('Synthetic claim output invalid'));}});
+  });
+  try {
+    const ids=[randomUUID(),randomUUID()],results=await Promise.allSettled(ids.map(run));
+    for(const result of results)assert.equal(result.status,'fulfilled');
+    const values=results.map(r=>{assert.equal(r.status,'fulfilled');return r.value;});
+    assert.equal(values.filter(v=>v.claimed).length,1);assert.ok(values.every(v=>v.networkAttempts===0));
+    assert.equal(values.find(v=>!v.claimed).rejection,'duplicate-claim');
+    const local=require(isolated.modulePath('dist/main/visionPilotReceipt.js'));
+    assert.equal(fs.existsSync(path.join(local.RECEIPT_DIRECTORY,grant+'.consumed')),true);
+    const receipts=ids.map(id=>{const result=local.readPilotReceipt(id);assert.equal(result.status,'valid');return result.receipt;});
+    assert.equal(receipts.filter(r=>r.authorizationConsumed).length,1);assert.ok(receipts.every(r=>r.transportInvocations===0));
+  } finally {isolated.dispose();}
 });

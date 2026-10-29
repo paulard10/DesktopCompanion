@@ -4,8 +4,15 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
-import { collectPilotProcess, preserveToolResult, classifyReceipt, OUTPUT_BYTES } from './vision-pilot-collector.mjs';
-import { launchOfflinePilot } from './vision-pilot-offline.mjs';
+import { createVisionPilotTestFixture } from './vision-pilot-test-fixture.mjs';
+const fixture=createVisionPilotTestFixture();
+const { collectPilotProcess, preserveToolResult, classifyReceipt, OUTPUT_BYTES }=await import(fixture.moduleUrl('scripts/vision-pilot-collector.mjs'));
+const { launchOfflinePilot: launchOwnedOfflinePilot }=await import(fixture.moduleUrl('scripts/vision-pilot-offline.mjs'));
+const launchOfflinePilot=async(...args)=>{
+  const result=await launchOwnedOfflinePilot(...args);
+  if(result.childClosed!==true)fixture.markUnclosed();
+  return result;
+};
 const require=createRequire(import.meta.url);
 let realNetwork=0;const originals=[];
 function deny(){realNetwork++;throw Error('Real network forbidden');}
@@ -14,7 +21,7 @@ replace(globalThis,'fetch');if('WebSocket'in globalThis)replace(globalThis,'WebS
 for(const name of ['node:http','node:https'])for(const k of ['request','get'])replace(require(name),k);
 for(const k of ['connect','createConnection'])replace(require('node:net'),k);
 replace(require('node:net').Socket.prototype,'connect');replace(require('node:tls'),'connect');
-after(()=>{for(const restore of originals.reverse())restore();assert.equal(realNetwork,0);});
+after(()=>{try{assert.equal(realNetwork,0);}finally{for(const restore of originals.reverse())restore();fixture.dispose();}});
 let successEvidence;
 before(async()=>{const out=await launchOfflinePilot('success');assert.equal(out.terminal,'SUCCEEDED');successEvidence=out.evidence;});
 function fakeChild({out='test output',err='test stderr',code=0,dropOut=false,dropErr=false}={}){
@@ -117,4 +124,28 @@ test('unsupported simulation never falls through to native transport',async()=>{
 test('unknown receipt evidence is never reinterpreted as no remote processing',()=>{
   assert.equal(classifyReceipt({status:'missing'}),'ATTEMPTED_OUTCOME_UNKNOWN');
   assert.equal(classifyReceipt({status:'corrupt'}),'ATTEMPTED_OUTCOME_UNKNOWN');
+});
+
+test('simultaneous distinct offline workers keep receipt IDs, answers and single-use claims separate',async()=>{
+  const ids=[randomUUID(),randomUUID(),randomUUID()];
+  const settled=await Promise.allSettled(ids.map(id=>launchOfflinePilot('success',id)));
+  for(const result of settled)assert.equal(result.status,'fulfilled');
+  const results=settled.map(result=>result.value);
+  for(let i=0;i<results.length;i++){
+    const result=results[i];assert.equal(result.testId,ids[i]);assert.equal(result.evidence.receipt.testId,ids[i]);
+    assert.equal(result.terminal,'SUCCEEDED');assert.equal(result.collectionComplete,true);assert.equal(result.childClosed,true);
+    assert.equal(result.evidence.receipt.domain,'offline-http-test');assert.equal(result.evidence.receipt.transportInvocations,1);
+  }
+  assert.equal(new Set(results.map(r=>r.evidence.receipt.testId)).size,ids.length);
+});
+
+test('simultaneous duplicate offline launch admits exactly one child without retry or stale success',async()=>{
+  const id=randomUUID(),settled=await Promise.allSettled([launchOfflinePilot('success',id),launchOfflinePilot('success',id)]);
+  for(const result of settled)assert.equal(result.status,'fulfilled');
+  const results=settled.map(result=>result.value);
+  assert.equal(results.filter(r=>r.terminal==='SUCCEEDED').length,1);
+  const rejected=results.find(r=>r.terminal==='BLOCKED');assert.ok(rejected);
+  assert.equal(rejected.collectorError,'duplicate-or-reservation');assert.equal(rejected.childClosed,true);
+  const winner=results.find(r=>r.terminal==='SUCCEEDED');assert.equal(winner.collectionComplete,true);
+  assert.equal(winner.evidence.receipt.transportInvocations,1);assert.equal(realNetwork,0);
 });
