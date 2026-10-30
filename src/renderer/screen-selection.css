@@ -23,4 +23,9 @@ textarea { display: block; width: 100%; resize: vertical; min-height: 56px; max-
 #question-count { display: block; text-align: right; font-size: 12px; }
 #review-text, #vision-answer { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid #85ff95; padding: 8px; }
 #vision-review { margin-top: 12px; }
+#remote-sharing { padding: 8px 10px; border: 1px solid #578865; border-radius: 6px; }
+#remote-sharing p { font-size: 12px; }
+#remote-sharing summary { font-size: 12px; cursor: pointer; }
+#remote-identity { font-weight: 600; }
+#vision-availability { color: #d5ebdb; }
 :focus-visible { outline: 2px solid #a6ffb4; outline-offset: 2px; }

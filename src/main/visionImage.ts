@@ -39,7 +39,8 @@ export function isCanonicalPngDataUri(value: unknown): value is string {
     bytes.toString('base64') === encoded;
 }
 
-export function encodeSyntheticCrop(value: unknown): string {
+/** Full PNG validation without allocating a Base64/JSON copy for eligibility. */
+function validatedPng(value: unknown): Buffer {
   try {
     if (!record(value) || !exactKeys(value, ['kind','mime','bytes','width','height','x','y','sourceWidth','sourceHeight']) ||
         !['approved-synthetic-crop', 'approved-local-crop'].includes(value.kind as string) ||
@@ -90,8 +91,14 @@ export function encodeSyntheticCrop(value: unknown): string {
     };
     if (decoded.buffer.length !== expected || decoded.engine.bytesWritten !== packed.length) reject();
     for (let row = 0; row < height; row++) if (decoded.buffer[row * rowBytes]! > 4) reject();
-    const uri = PREFIX + bytes.toString('base64');
-    if (!isCanonicalPngDataUri(uri)) reject();
-    return uri;
+    return bytes;
   } catch { return reject(); }
+}
+
+export function validateVisionCrop(value: unknown): void { validatedPng(value); }
+
+export function encodeSyntheticCrop(value: unknown): string {
+  const uri = PREFIX + validatedPng(value).toString('base64');
+  if (!isCanonicalPngDataUri(uri)) reject();
+  return uri;
 }

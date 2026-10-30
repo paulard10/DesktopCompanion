@@ -225,3 +225,48 @@ test('renderer loss and Quit abort mock and remove vision listeners',async t=>{
   f.emit('vision',{type:'run',sessionId:id,revision:2,token:f.notice().vision.token});
   f.win().webContents.emit('render-process-gone');assert.equal(f.c.active(),false);f.c.destroy();assert.equal(ipc.listenerCount('selection:vision'),0);
 });
+
+test('live-ready preview keeps actual owned capture and question pipeline offline',async t=>{
+  let external=0;const noNetwork=()=>{external++;throw Error('No external requests');};
+  t.mock.method(globalThis,'fetch',noNetwork);
+  const f=fixture(t);enableVisionCrop();assert.equal(requests.length,0);f.begin();f.select();assert.equal(requests.length,0);
+  f.confirm();await settle();const n=f.notice(),id=n.sessionId;
+  assert.equal(requests.length,1);assert.equal(n.vision.sharing.remoteStatus,'unavailable');
+  assert.equal(n.vision.imageEligibility.available,true);assert.equal(n.vision.token,undefined);
+  const imageId=n.vision.imageId,question='Exact invented question. No remote approval.';
+  f.emit('vision',{type:'edit',sessionId:id,question,revision:2,scenario:'success'});
+  assert.equal(f.notice().vision.phase,'editing');assert.equal(f.notice().vision.token,undefined);
+  f.emit('vision',{type:'review',sessionId:id,question,revision:2,scenario:'success'});
+  const review=f.notice().vision.review;
+  assert.equal(review.imageId,imageId);assert.equal(review.sessionId,id);assert.equal(review.question,question);
+  assert.equal(review.width,50);assert.equal(review.height,26);assert.equal(review.purpose,'offline-simulation-only');
+  assert.equal(review.previewExpiresAt,n.vision.previewExpiresAt);assert.equal(review.model,'qwen3.7-plus');
+  const token=f.notice().vision.token,count=f.win().webContents.sent.length;
+  f.emit('vision',{type:'send-remote',sessionId:id,token,revision:2});
+  f.emit('vision',{type:'run',sessionId:id,token,revision:2,endpoint:'https://invalid/'});
+  assert.equal(f.win().webContents.sent.length,count);
+  f.emit('vision',{type:'run',sessionId:id,token,revision:2});f.emit('vision',{type:'run',sessionId:id,token,revision:2});
+  await new Promise(r=>setTimeout(r,450));assert.match(f.notice().vision.answer,/Simulated response/);
+  assert.equal(f.win().webContents.sent.filter(n=>n.payload.vision?.phase==='running').length,1);
+  assert.equal(external,0);f.emit('cancel',id);assert.equal(f.c.active(),false);assert.equal(f.win().destroyed,true);
+});
+test('controller retains oversized local preview and discard while vision is unavailable',async t=>{
+  const f=fixture(t);enableVisionCrop();
+  // Locally supported 1500x1500 (2.25M pixels), over vision's 2,097,152 budget.
+  displays=[{id:7,bounds:{x:0,y:0,width:1800,height:1600},workArea:{x:0,y:0,width:1800,height:1560},scaleFactor:1}];
+  acquire=async()=>[{display_id:'7',thumbnail:image(1800,1600,{crop:(r:any)=>image(r.width,r.height,{
+    toPNG:()=>makePng(r.width,r.height,Buffer.alloc((r.width*4+1)*r.height)),
+  })})}];
+  f.begin();const id=f.notice().sessionId;f.emit('select',id,7,{x:0,y:0,width:1500,height:1500});f.confirm();await settle();
+  assert.equal(f.notice().phase,'PREVIEWING');assert.equal(f.notice().image.width,1500);
+  assert.equal(f.notice().vision.imageEligibility.available,false);assert.match(f.notice().vision.imageEligibility.message,/Preview and Discard remain available/);
+  assert.equal(f.win().destroyed,false);f.emit('cancel',id);assert.equal(f.win().destroyed,true);
+});
+test('controller session lifetime includes selection time, not a fresh 120 seconds at preview',async t=>{
+  t.mock.timers.enable({apis:['Date','setTimeout']});const f=fixture(t);enableVisionCrop();f.begin();
+  t.mock.timers.tick(90_000);f.select();f.confirm();await settle();const id=f.notice().sessionId;
+  for(const type of ['edit','review'])f.emit('vision',{type,sessionId:id,question:'Question',revision:2,scenario:'success'});
+  const n=f.notice().vision;assert.equal(n.expiresAt,n.previewExpiresAt);const token=n.token;
+  t.mock.timers.tick(30_000);assert.equal(f.win().destroyed,true);assert.equal(f.c.active(),false);
+  f.emit('vision',{type:'run',sessionId:id,token,revision:2});assert.equal(f.win().webContents.sent.some(n=>n.payload.vision?.phase==='running'),false);
+});

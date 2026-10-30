@@ -1,5 +1,5 @@
 import { normalizeSelection, type ScreenSelectionBridge, type SelectionNotice } from '../shared/screenSelection';
-import { validVisionQuestion, type OfflineVisionNotice, type OfflineVisionScenario } from '../shared/offlineVision';
+import { validVisionQuestion, VISION_SHARING, type OfflineVisionNotice, type OfflineVisionScenario } from '../shared/offlineVision';
 
 declare global { interface Window { screenSelection: ScreenSelectionBridge } }
 const surface = document.querySelector<HTMLDivElement>('#surface')!;
@@ -21,19 +21,28 @@ const cancelVision = document.querySelector<HTMLButtonElement>('#cancel-vision')
 const reviewPanel = document.querySelector<HTMLElement>('#vision-review')!;
 const visionStatus = document.querySelector<HTMLElement>('#vision-status')!;
 const answer = document.querySelector<HTMLElement>('#vision-answer')!;
+const remoteSend = document.querySelector<HTMLButtonElement>('#send-remote')!;
+const availability = document.querySelector<HTMLElement>('#vision-availability')!;
+// Noninteractive disclosure; there is deliberately no remote click listener/IPC.
+for (const [id, text] of Object.entries({ 'remote-identity': VISION_SHARING.identity, 'remote-boundary': VISION_SHARING.boundary,
+  'remote-shared': VISION_SHARING.shared, 'remote-excluded': VISION_SHARING.excluded, 'remote-risks': VISION_SHARING.risks })) {
+  document.querySelector<HTMLElement>(`#${id}`)!.textContent = text;
+}
 let visionState: OfflineVisionNotice | undefined;
 let revision = 1;
 const release = (): void => {
   image.removeAttribute('src'); if (objectUrl) URL.revokeObjectURL(objectUrl); objectUrl = null;
   visionState = undefined; question.value = ''; answer.textContent = ''; visionStatus.textContent = '';
+  availability.textContent = ''; remoteSend.disabled = true;
   if (state) state = { ...state, image: undefined, vision: undefined };
   document.querySelector('#review-text')!.textContent = ''; reviewPanel.hidden = true; vision.hidden = true;
+  document.querySelector('#review-image')!.textContent = '';
 };
 function editQuestion(): void {
   if (!state || state.phase !== 'PREVIEWING' || !visionState) return;
   revision++; visionState = { ...visionState, phase: 'editing', token: undefined, answer: undefined };
   reviewPanel.hidden = true; run.disabled = true; answer.hidden = true; answer.textContent = '';
-  review.disabled = !validVisionQuestion(question.value);
+  review.disabled = !visionState.imageEligibility.available || !validVisionQuestion(question.value);
   document.querySelector('#question-count')!.textContent = `${question.value.length} / 500`;
   window.screenSelection.vision({ type: 'edit', sessionId: state.sessionId, question: question.value,
     revision, scenario: scenario.value as OfflineVisionScenario });
@@ -41,7 +50,7 @@ function editQuestion(): void {
 question.addEventListener('input', editQuestion);
 scenario.addEventListener('change', editQuestion);
 review.addEventListener('click', () => {
-  if (!state || !visionState || !validVisionQuestion(question.value) || visionState.phase === 'running') return;
+  if (!state || !visionState || !visionState.imageEligibility.available || !validVisionQuestion(question.value) || visionState.phase === 'running') return;
   review.disabled = true;
   window.screenSelection.vision({ type: 'review', sessionId: state.sessionId, question: question.value,
     revision, scenario: scenario.value as OfflineVisionScenario });
@@ -65,10 +74,14 @@ function showVision(next: OfflineVisionNotice): void {
   // Main echoes the validated draft; never insert image/model text as HTML.
   question.value = next.question; scenario.value = next.scenario;
   question.disabled = scenario.disabled = next.phase === 'running';
-  review.disabled = !validVisionQuestion(next.question) || next.phase === 'running';
+  review.disabled = !next.imageEligibility.available || !validVisionQuestion(next.question) || next.phase === 'running';
+  remoteSend.disabled = true;
+  availability.textContent = next.imageEligibility.message;
   document.querySelector('#question-count')!.textContent = `${next.question.length} / 500`;
   reviewPanel.hidden = next.phase !== 'review';
-  document.querySelector('#review-text')!.textContent = next.phase === 'review' ? next.question : '';
+  document.querySelector('#review-text')!.textContent = next.phase === 'review' ? next.review?.question ?? '' : '';
+  document.querySelector('#review-image')!.textContent = next.phase === 'review' && next.review
+    ? `Same selected PNG: ${next.review.width} × ${next.review.height} pixels, ${next.review.pngBytes} bytes. Approval: one local simulation only.` : '';
   run.disabled = next.phase !== 'review' || !next.token;
   cancelVision.hidden = !['review', 'running'].includes(next.phase);
   visionStatus.textContent = next.message;

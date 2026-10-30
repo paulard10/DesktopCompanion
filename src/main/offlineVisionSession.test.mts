@@ -24,12 +24,14 @@ patch(Module,'_load',function(id:string,...args:any[]){
   return load.call(this,id,...args);
 });
 const {createOfflineVisionSession,OFFLINE_APPROVAL_MS,SIMULATED_ANSWER}=require('../../dist/main/offlineVisionSession.js');
-const {validVisionQuestion}=require('../../dist/shared/offlineVision.js');
+const {validVisionQuestion,VISION_SHARING}=require('../../dist/shared/offlineVision.js');
+const {SCREEN_SELECTION}=require('../../dist/shared/screenSelection.js');
+const {validateVisionCrop,encodeSyntheticCrop}=require('../../dist/main/visionImage.js');
 after(()=>{for(const r of restores.reverse())r();assert.deepEqual({network,writes,clipboard,secretReads},{network:0,writes:0,clipboard:0,secretReads:0});});
 const wait=(ms=420)=>new Promise(r=>setTimeout(r,ms));
-function setup(t:any,patch:any={}){
+function setup(t:any,patch:any={},options:any={}){
   const notices:any[]=[],crop={...fixture(),kind:'approved-local-crop',...patch};
-  const session=createOfflineVisionSession({sessionId:'preview-A',crop,publish:(n:any)=>notices.push(n)});
+  const session=createOfflineVisionSession({sessionId:'preview-A',crop,publish:(n:any)=>notices.push(n),...options});
   t.after(()=>session.dispose());
   let revision=0,question='',scenario='success';
   const send=(a:any)=>session.dispatch({sessionId:'preview-A',...a});
@@ -142,4 +144,92 @@ test('image, question and tokens do not enter console logs',async t=>{
   keys.forEach(k=>{console[k]=(...a:any[])=>logs.push(a);});
   try{const f=setup(t);f.edit('FAKE_PRIVATE_TEXT');f.review();f.run();await wait();assert.deepEqual(logs,[]);}
   finally{keys.forEach((k,i)=>{console[k]=previous[i]!;});}
+});
+
+// M3.4b.4a: same session and closed adapter, never an injectable HTTP driver.
+test('future disclosure is fixed, unavailable and never remote consent',t=>{
+  const f=setup(t);f.edit();const policy=f.last().sharing;
+  assert.equal(policy,VISION_SHARING);assert.ok(Object.isFrozen(policy));
+  assert.equal(policy.provider,'Alibaba Cloud Model Studio');assert.equal(policy.region,'Singapore');assert.equal(policy.model,'qwen3.7-plus');
+  assert.equal(policy.remoteStatus,'unavailable');assert.equal(policy.remoteConsent,'not-requested');
+  assert.match(policy.boundary,/Local capture is not permission to upload/);
+  assert.match(policy.shared,/exactly this cropped PNG.*exact edited question/);
+  for(const omitted of ['full desktop','clipboard','chat history','microphone/audio','local paths','screen coordinates'])assert.ok(policy.excluded.includes(omitted));
+  assert.match(policy.risks,/may retain/);assert.match(policy.risks,/may incur charges/);assert.match(policy.risks,/cannot recall/);
+  f.review();assert.equal(f.last().sharing.remoteConsent,'not-requested');assert.equal(f.last().review.purpose,'offline-simulation-only');
+});
+test('review exposes exact session/crop/question metadata with no payload or endpoint',t=>{
+  const f=setup(t),q='  ¿Qué significa?\nñ & <script>untrusted</script>  ';f.edit(q);f.review();const n=f.last(),r=n.review;
+  assert.ok(Object.isFrozen(r));assert.deepEqual(r,{purpose:'offline-simulation-only',sessionId:'preview-A',imageId:n.imageId,
+    revision:1,question:q,provider:'Alibaba Cloud Model Studio',region:'Singapore',model:'qwen3.7-plus',mime:'image/png',
+    width:f.crop.width,height:f.crop.height,pngBytes:f.crop.bytes.byteLength,expiresAt:n.expiresAt,previewExpiresAt:n.previewExpiresAt});
+  assert.equal(n.png,undefined);assert.equal(r.bytes,undefined);assert.equal(r.endpoint,undefined);assert.equal(r.digest,undefined);
+});
+for(const extra of [{imageId:'replacement'},{bytes:new Uint8Array(10)},{base64:'anything'},{path:'C:\\private.png'},
+  {url:'file:///ignored.png'},{endpoint:'https://example.invalid/'},{model:'another-model'},{credential:'fake'},
+  {approval:'remote'},{provider:'other'},{mode:'live'}])
+  test(`review rejects renderer injection: ${Object.keys(extra)[0]}`,t=>{
+    const f=setup(t);f.edit();const count=f.notices.length;
+    f.send({type:'review',question:f.last().question,revision:1,scenario:'success',...extra});
+    assert.equal(f.notices.length,count);assert.equal(f.last().token,undefined);
+  });
+test('offline token and old synthetic pilot-shaped approval cannot activate a remote action',t=>{
+  const f=setup(t);f.edit();f.review();const token=f.last().token,count=f.notices.length;
+  for(const type of ['send-remote','authorize-remote','live','send'])f.send({type,token,revision:1});
+  f.send({type:'run',token,revision:1,mode:'live'});
+  f.send({type:'run',token:{scope:'one-synthetic-vision-request'},revision:1});
+  assert.equal(f.notices.length,count);assert.equal(f.last().phase,'review');
+});
+for(const patch of [{bytes:new Uint8Array(2*1024*1024+1)},{width:2048,height:2048},{bytes:new Uint8Array([255,216,255,0])}])
+  test(`image eligibility rejects at preview edit, before any review (${Object.keys(patch)[0]} ${patch.width??patch.bytes?.length})`,t=>{
+    const f=setup(t,patch);f.edit('Valid');assert.equal(f.last().phase,'editing');assert.equal(f.last().imageEligibility.available,false);
+    assert.match(f.last().imageEligibility.message,/Preview and Discard remain available/);assert.match(f.last().imageEligibility.message,/No resizing/);
+    assert.equal(f.last().token,undefined);assert.equal(f.last().review,undefined);f.session.dispose();
+  });
+test('eligibility validates PNG without encoding Base64 or constructing a request',t=>{
+  const png=fixture();const original=Buffer.prototype.toString;
+  let encodes=0;t.mock.method(Buffer.prototype,'toString',function(this:Buffer,...args:any[]){if(args[0]==='base64')encodes++;return Reflect.apply(original,this,args);});
+  validateVisionCrop(png);assert.equal(encodes,0);
+  const f=setup(t);f.edit();assert.equal(f.last().imageEligibility.available,true);assert.equal(encodes,0);
+});
+test('preview deadline clips 30-second review without extending the 120-second session',t=>{
+  t.mock.timers.enable({apis:['Date']});const expiresAt=Date.now()+SCREEN_SELECTION.sessionMs;
+  const f=setup(t,{}, {expiresAt});t.mock.timers.tick(110_000);f.edit();f.review();
+  assert.equal(f.last().expiresAt,expiresAt);assert.equal(f.last().review.previewExpiresAt,expiresAt);
+  assert.equal(f.last().sharing.remoteConsent,'not-requested');
+});
+test('expired preview refuses unused token even if controller timer has not run',t=>{
+  t.mock.timers.enable({apis:['Date']});const f=setup(t);f.edit();f.review();const token=f.last().token;
+  t.mock.timers.tick(SCREEN_SELECTION.sessionMs);f.run(token);assert.match(f.last().message,/Local preview expired/);
+  const count=f.notices.length;f.edit();f.review();f.run(token);assert.equal(f.notices.length,count);
+  assert.equal(f.notices.some(n=>n.phase==='running'),false);
+});
+test('response after preview deadline is discarded even with delayed window cleanup',async t=>{
+  t.mock.timers.enable({apis:['Date','setTimeout']});const f=setup(t);t.mock.timers.tick(119_800);
+  f.edit();f.review();f.run();t.mock.timers.tick(400);for(let i=0;i<12;i++)await Promise.resolve();
+  assert.equal(f.notices.some(n=>n.phase==='result'),false);const count=f.notices.length;f.edit();assert.equal(f.notices.length,count);
+});
+test('invalid or artificially extended preview deadline is rejected',t=>{
+  for(const expiresAt of [NaN,Infinity,Date.now()+SCREEN_SELECTION.sessionMs+1000])assert.throws(()=>setup(t,{}, {expiresAt}),/Invalid preview lifetime/);
+});
+test('exact approved crop reaches existing builder and closed mock without persistence or I/O',async t=>{
+  t.mock.timers.enable({apis:['Date','setTimeout']});
+  const adapterModule=require('../../dist/main/qwenVisionAdapter.js'),mockModule=require('../../dist/main/qwenVisionMock.js');
+  const originalBuilder=adapterModule.buildVisionRequest,originalMock=mockModule.createVisionMock;
+  const built:any[]=[],handles:any[]=[];
+  t.mock.method(adapterModule,'buildVisionRequest',(input:any,...args:any[])=>{const result=originalBuilder(input,...args);if(result.ok)built.push(result.request);return result;});
+  t.mock.method(mockModule,'createVisionMock',(script:any)=>{const handle=originalMock(script);handles.push(handle);return handle;});
+  const f=setup(t);assert.equal(built.length,0);assert.equal(handles.length,0);
+  const exact='  Describe solo el recorte.\nNo envíes nada.  ';f.edit(exact);assert.equal(built.length,0);f.review();
+  assert.equal(handles.length,0);assert.equal(built.length,1);
+  assert.equal(built[0].body.model,'qwen3.7-plus');assert.equal(built[0].body.messages[1].content[0].text,exact);
+  assert.equal(built[0].body.messages[1].content[1].image_url.url,encodeSyntheticCrop(f.crop));
+  assert.equal(built[0].body.messages.length,2);assert.match(built[0].body.messages[0].content,/untrusted data/);
+  assert.equal(built[0].body.tools,undefined);assert.equal(built[0].body.messages[1].content[1].image_url.path,undefined);
+  const token=f.last().token;f.run(token);f.run(token);assert.equal(handles.length,1);
+  assert.equal(mockModule.visionMockStats(handles[0]).calls,1);t.mock.timers.tick(400);
+  for(let i=0;i<12;i++)await Promise.resolve();assert.equal(f.last().answer,SIMULATED_ANSWER);
+  assert.equal(f.last().sharing.remoteStatus,'unavailable');assert.equal(f.last().token,undefined);assert.equal(f.last().review,undefined);
+  f.session.dispose();const count=f.notices.length;f.run(token);assert.equal(f.notices.length,count);
+  built.length=0;handles.length=0; // Test-only payload observation does not become retained application history.
 });

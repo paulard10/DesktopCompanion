@@ -19,7 +19,7 @@ export function createScreenSelectionController(options: {
 }): ScreenSelectionController {
   type Live = { id: string; display: SelectionDisplay; phase: SelectionPhase; win: BrowserWindow;
     rect?: SelectionRect; timeout: ReturnType<typeof setTimeout>; abort: AbortController;
-    visibility?: ReturnType<typeof options.conceal>; ready: boolean; vision?: OfflineVisionSession };
+    visibility?: ReturnType<typeof options.conceal>; ready: boolean; expiresAt: number; vision?: OfflineVisionSession };
   let live: Live | null = null, disposed = false, acquiring = false;
   const report = (message: string): void => {
     if (!disposed) void dialog.showMessageBox({ type: 'info', title: 'Private screen selection', message });
@@ -147,7 +147,7 @@ export function createScreenSelectionController(options: {
       let initialImage: SelectionNotice['image'] = { png, ...size };
       // Only the trusted acquisition supplies canonical pixels and geometry.
       // Renderer actions contain IDs/question/token, never image bytes or paths.
-      s.vision = createOfflineVisionSession({ sessionId: s.id,
+      s.vision = createOfflineVisionSession({ sessionId: s.id, expiresAt: s.expiresAt,
         crop: { kind: 'approved-local-crop', mime: 'image/png', bytes: png, ...crop,
           sourceWidth: actual.width, sourceHeight: actual.height },
         publish: vision => {
@@ -200,7 +200,8 @@ export function createScreenSelectionController(options: {
         title: 'Private local preview', webPreferences: { preload: options.preloadPath, session: isolated,
           sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, devTools: false, zoomFactor: 1 } });
       const s: Live = { id: randomUUID(), display: { id: display.id, bounds: { ...display.bounds }, scaleFactor: display.scaleFactor },
-        phase: 'SELECTING', win, ready: false, abort: new AbortController(), timeout: setTimeout(finish, SCREEN_SELECTION.sessionMs) };
+        phase: 'SELECTING', win, ready: false, expiresAt: Date.now() + SCREEN_SELECTION.sessionMs,
+        abort: new AbortController(), timeout: setTimeout(finish, SCREEN_SELECTION.sessionMs) };
       live = s; options.onActive(true);
       win.setBackgroundMaterial('none'); win.setMenuBarVisibility(false);
       // Windows constrains the initial non-fullscreen constructor rectangle to

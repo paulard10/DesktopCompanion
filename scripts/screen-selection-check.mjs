@@ -11,8 +11,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 if (!process.versions.electron) {
   const tempRoot = fs.realpathSync(os.tmpdir());
   const directory = fs.mkdtempSync(path.join(tempRoot, 'companion-selection-proof-'));
-  const env = { ...process.env, COMPANION_SELECTION_PROFILE: directory };
-  delete env.ELECTRON_RUN_AS_NODE; delete env.DESKTOP_COMPANION_DEV; delete env.DESKTOP_COMPANION_SMOKE;
+  const env = { COMPANION_SELECTION_PROFILE: directory };
+  for (const name of ['SystemRoot','WINDIR','TEMP','TMP','APPDATA','LOCALAPPDATA','USERPROFILE','PATH'])
+    if (process.env[name] !== undefined) env[name] = process.env[name];
   const child = spawn(process.execPath, [path.join(root, 'node_modules/electron/cli.js'), fileURLToPath(import.meta.url)], {
     cwd: root, env, stdio: 'inherit', windowsHide: true,
   });
@@ -26,8 +27,22 @@ if (!process.versions.electron) {
     if (code !== 0) process.exitCode = code ?? 1;
   });
 } else {
-  const { app, BrowserWindow, ipcMain, nativeImage, desktopCapturer, screen, session } = await import('electron');
+  const { app, BrowserWindow, ipcMain, nativeImage, desktopCapturer, screen, session, net, safeStorage } = await import('electron');
   const require = createRequire(import.meta.url);
+  let externalAttempts = 0, credentialAttempts = 0, captureAttempts = 0;
+  const denyNetwork = () => { externalAttempts++; throw new Error('No network in offline proof'); };
+  globalThis.fetch = denyNetwork; if ('WebSocket' in globalThis) globalThis.WebSocket = denyNetwork;
+  net.fetch = denyNetwork; net.request = denyNetwork;
+  for (const name of ['node:http','node:https']) for (const key of ['request','get']) require(name)[key] = denyNetwork;
+  for (const key of ['connect','createConnection']) require('node:net')[key] = denyNetwork;
+  require('node:net').Socket.prototype.connect = denyNetwork; require('node:tls').connect = denyNetwork;
+  const denyCredential = () => { credentialAttempts++; throw new Error('No credentials in offline proof'); };
+  safeStorage.decryptString = denyCredential; safeStorage.decryptStringAsync = denyCredential;
+  const Module = require('node:module'), load = Module._load;
+  Module._load = function (name, ...args) {
+    if (/safeCredentialStore|providerSettings|keyVault|qwenVisionTransport/.test(name)) return denyCredential();
+    return load.call(this, name, ...args);
+  };
   const { registerAppScheme, registerAppProtocol } = require('../dist/main/protocol.js');
   const { SELECTION_CSP } = require('../dist/main/screenSelectionWindow.js');
   const { pixelCrop, captureSize } = require('../dist/shared/screenSelection.js');
@@ -36,10 +51,9 @@ if (!process.versions.electron) {
   assert.ok(directory && path.basename(directory).startsWith('companion-selection-proof-'));
   app.setPath('userData', directory); app.setPath('sessionData', directory); registerAppScheme();
   // Make any accidental real desktop request an immediate test failure.
-  desktopCapturer.getSources = () => { throw new Error('Real desktop capture forbidden in synthetic proof'); };
+  desktopCapturer.getSources = () => { captureAttempts++; throw new Error('Real desktop capture forbidden in synthetic proof'); };
   let win, visualSession, finished = false, processCountBeforeWindow = 0;
-  let externalAttempts = 0, visionOperations = 0, lastRun;
-  globalThis.fetch = () => { externalAttempts++; throw new Error('No network in offline proof'); };
+  let visionOperations = 0, lastRun;
   const deadline = setTimeout(() => finish(false, 'deadline'), 15_000);
   function finish(ok, detail = '') {
     if (finished) return; finished = true; clearTimeout(deadline);
@@ -133,6 +147,13 @@ if (!process.versions.electron) {
           throw new Error('Synthetic renderer state deadline');
         };
         await until(`!document.querySelector('#vision').hidden`);
+        assert.equal(await evaluate(`document.querySelector('#send-remote').disabled`), true);
+        const disclosure = await evaluate(`document.querySelector('#remote-sharing').textContent`);
+        for (const text of ['Alibaba Cloud Model Studio','Singapore','qwen3.7-plus','Local capture is not permission to upload',
+          'may retain','may incur charges','cannot recall','chat history','screen coordinates']) assert.ok(disclosure.includes(text), text);
+        // A disabled control has no live handler even if devtools-style code enables it.
+        await evaluate(`document.querySelector('#send-remote').disabled=false;document.querySelector('#send-remote').click()`);
+        assert.equal(visionOperations, 0); assert.equal(externalAttempts, 0); assert.equal(credentialAttempts, 0);
         assert.equal(await evaluate(`document.querySelector('#review-question').disabled`), true);
         await evaluate(`{
           const q=document.querySelector('#question'); q.value='¿Qué significa este error?';
@@ -144,6 +165,9 @@ if (!process.versions.electron) {
         await evaluate(`document.querySelector('#review-question').click()`);
         await until(`!document.querySelector('#vision-review').hidden`);
         assert.equal(await evaluate(`document.querySelector('#review-text').textContent`), '¿Qué significa este error?');
+        assert.equal(await evaluate(`document.querySelector('#remote-sharing').getBoundingClientRect().height > 0 && document.querySelector('#crop').getBoundingClientRect().height >= 1`), true);
+        assert.match(await evaluate(`document.querySelector('#review-image').textContent`), /Same selected PNG: 60 × 30 pixels.*one local simulation only/);
+        assert.equal(await evaluate(`document.querySelector('#send-remote').disabled`), true);
         assert.equal(await evaluate(`document.querySelector('#crop').src`), previewBlob);
         assert.equal(visionOperations, 0);
         await evaluate(`{
@@ -171,11 +195,12 @@ if (!process.versions.electron) {
         await evaluate(`document.querySelector('#cancel-vision').click()`);
         await until(`!document.querySelector('#question').disabled`);
         assert.equal(await evaluate(`document.querySelector('#vision-answer').hidden`), true);
-        assert.equal(externalAttempts, 0); assert.equal(win.isVisible(), false);
+        assert.equal(externalAttempts, 0); assert.equal(credentialAttempts, 0); assert.equal(captureAttempts, 0); assert.equal(win.isVisible(), false);
+        assert.equal(await evaluate(`document.querySelector('#send-remote').disabled`), true);
         // Real discard button -> preload -> owned main handler, no actual capture.
         ipcMain.once('selection:cancel', (e, id) => {
           assert.equal(e.sender, win.webContents); assert.equal(id, payload.sessionId);
-          visualSession.dispose(); finish(true, 'native crop at 100/125/150%; exact review/edit/review/one-use mock/cancel/discard via sandbox preload; zero external attempts; no desktop capture');
+          visualSession.dispose(); finish(true, 'native crop at 100/125/150%; disclosure/disabled remote/exact binding/edit/one-use mock/cancel/discard via sandbox preload; zero external/credential/capture attempts');
         });
         await evaluate(`document.querySelector('#cancel').click()`);
       } catch (error) { finish(false, error.message); }

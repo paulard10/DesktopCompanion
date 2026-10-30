@@ -15,6 +15,7 @@
   <main id="preview" hidden aria-label="Local image preview"><img id="crop" alt="User-approved cropped screen area"></main>
   <section id="vision" hidden aria-label="Offline visual question">
     <p class="local-label">LOCAL SIMULATION ONLY · No upload · No AI analysis</p>
+    <p id="vision-availability" role="status"></p>
     <label for="question">Ask about this image</label>
     <textarea id="question" maxlength="500" rows="2" placeholder="Write your own question" aria-describedby="question-count vision-status"></textarea>
     <span id="question-count">0 / 500</span>
@@ -25,6 +26,16 @@
       <strong>Review selected screen area and question</strong>
       <p>The image above is the exact crop used. Only a local simulation is authorized. Nothing will leave this device.</p>
       <p id="review-text"></p>
+      <p id="review-image"></p>
+      <aside id="remote-sharing" aria-label="Future remote sharing">
+        <p id="remote-identity"></p>
+        <p id="remote-boundary"></p>
+        <details>
+          <summary>What would a future remote question share?</summary>
+          <p id="remote-shared"></p><p id="remote-excluded"></p><p id="remote-risks"></p>
+        </details>
+        <button id="send-remote" type="button" disabled aria-describedby="remote-boundary">Send to Qwen — unavailable</button>
+      </aside>
       <button id="run-offline" type="button">Run offline vision test</button>
     </div>
     <button id="cancel-vision" type="button" hidden>Cancel review / test</button>
