@@ -8,13 +8,14 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const bridgeProof = process.argv.includes('--offline-bridge'); // This standalone synthetic harness only; never an app activation flag.
 if (!process.versions.electron) {
   const tempRoot = fs.realpathSync(os.tmpdir());
   const directory = fs.mkdtempSync(path.join(tempRoot, 'companion-selection-proof-'));
   const env = { COMPANION_SELECTION_PROFILE: directory };
   for (const name of ['SystemRoot','WINDIR','TEMP','TMP','APPDATA','LOCALAPPDATA','USERPROFILE','PATH'])
     if (process.env[name] !== undefined) env[name] = process.env[name];
-  const child = spawn(process.execPath, [path.join(root, 'node_modules/electron/cli.js'), fileURLToPath(import.meta.url)], {
+  const child = spawn(process.execPath, [path.join(root, 'node_modules/electron/cli.js'), fileURLToPath(import.meta.url), ...(bridgeProof ? ['--offline-bridge'] : [])], {
     cwd: root, env, stdio: 'inherit', windowsHide: true,
   });
   const deadline = setTimeout(() => { console.error('selection-proof: timeout'); child.kill(); }, 30_000);
@@ -40,13 +41,32 @@ if (!process.versions.electron) {
   safeStorage.decryptString = denyCredential; safeStorage.decryptStringAsync = denyCredential;
   const Module = require('node:module'), load = Module._load;
   Module._load = function (name, ...args) {
-    if (/safeCredentialStore|providerSettings|keyVault|qwenVisionTransport/.test(name)) return denyCredential();
+    if (/safeCredentialStore|providerSettings|keyVault|visionPilotReceipt/.test(name) || (!bridgeProof && /qwenVisionTransport/.test(name))) return denyCredential();
     return load.call(this, name, ...args);
   };
   const { registerAppScheme, registerAppProtocol } = require('../dist/main/protocol.js');
   const { SELECTION_CSP } = require('../dist/main/screenSelectionWindow.js');
   const { pixelCrop, captureSize } = require('../dist/shared/screenSelection.js');
   const { createOfflineVisionSession } = require('../dist/main/offlineVisionSession.js');
+  let bridgeScenario = 'success', bridgeChecks = 0;
+  if (bridgeProof) {
+    const requestModule = require('../dist/main/screenVisionRequest.js');
+    const { createOfflineScreenVisionBridge } = require('../dist/main/screenVisionBridge.js');
+    const { createVisionBridgeDummy, visionBridgeDummyStats } = require('../dist/main/screenVisionBridgeFake.js');
+    const { createVisionMock, visionMockStats } = require('../dist/main/qwenVisionMock.js');
+    requestModule.executeScreenVisionMock = async (wire, _legacy, signal, attempt) => {
+      const fake = createVisionMock([bridgeScenario === 'timeout' ? { failure: 'pending' } : { status: 200, delayMs: 400,
+        body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Offline bridge only. No visual understanding.' }, finish_reason: 'stop' }] }) }]);
+      const dummy = createVisionBridgeDummy(), bridge = createOfflineScreenVisionBridge({ transport: fake, dummy });
+      try {
+        const result = await bridge.run(wire, signal);
+        assert.ok(visionBridgeDummyStats(dummy).loads <= 1); assert.ok(visionMockStats(fake).calls <= 1);
+        if (result.ok) { assert.equal(visionBridgeDummyStats(dummy).loads, 1); assert.equal(visionMockStats(fake).calls, 1); }
+        assert.equal(result.evidence.transport, 'closed-fake');
+        attempt.fakeDispatches = result.evidence.fakeDispatches ?? 0; bridgeChecks++; return result;
+      } finally { bridge.dispose(); }
+    };
+  }
   const directory = process.env.COMPANION_SELECTION_PROFILE;
   assert.ok(directory && path.basename(directory).startsWith('companion-selection-proof-'));
   app.setPath('userData', directory); app.setPath('sessionData', directory); registerAppScheme();
@@ -126,6 +146,7 @@ if (!process.versions.electron) {
           crop: { kind: 'approved-local-crop', mime: 'image/png', bytes: png, ...output,
             x: 30, y: 45, sourceWidth: 240, sourceHeight: 180 },
           publish(vision) {
+            bridgeScenario = vision.scenario;
             if (vision.phase === 'running') visionOperations++;
             if (vision.phase === 'screen-running') screenOperations++;
             win.webContents.send('selection:notice', { ...payload, vision });
@@ -229,7 +250,9 @@ if (!process.versions.electron) {
         // Real discard button -> preload -> owned main handler, no actual capture.
         ipcMain.once('selection:cancel', (e, id) => {
           assert.equal(e.sender, win.webContents); assert.equal(id, payload.sessionId);
-          visualSession.dispose(); finish(true, 'native crop at 100/125/150%; separate screen review/confirmation, shared builder/closed fake, duplicate/cancel/discard; real-send disabled; zero external/credential/capture attempts');
+          visualSession.dispose();
+          if (bridgeProof) assert.equal(bridgeChecks, 2);
+          finish(true, `native crop at 100/125/150%; separate screen review/confirmation, ${bridgeProof ? 'shared HTTP bridge/dummy credentials' : 'shared builder/closed fake'}, duplicate/cancel/discard; real-send disabled; zero external/credential/capture attempts`);
         });
         await evaluate(`document.querySelector('#cancel').click()`);
       } catch (error) { finish(false, error.message); }

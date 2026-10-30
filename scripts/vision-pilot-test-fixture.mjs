@@ -10,6 +10,7 @@ export const VISION_TEST_FILES = Object.freeze([
   'dist/main/visionPilotReceipt.js', 'dist/main/qwenVisionTransport.js',
   'dist/main/qwenVisionAdapter.js', 'dist/main/visionImage.js',
   'dist/main/visionPilotFixture.js', 'dist/main/qwenVisionMock.js',
+  'dist/main/screenVisionRequest.js', 'dist/main/screenVisionBridgeFake.js',
   'dist/shared/qwenEndpoint.js', 'dist/shared/providerErrors.js', 'dist/shared/offlineVision.js',
   'scripts/vision-pilot-collector.mjs', 'scripts/vision-pilot-offline.mjs',
   'scripts/vision-pilot-offline-worker.mjs', 'scripts/vision-live-preflight.mjs',

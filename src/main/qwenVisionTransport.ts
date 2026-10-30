@@ -7,6 +7,9 @@ import { chatCompletionsUrl } from '../shared/qwenEndpoint.js';
 import type { ProviderSettings } from './providerSettings.js';
 import type { KeyVault } from '../shared/keyVault.js';
 import type { PilotEvidence } from './visionPilotReceipt.js';
+import { readScreenVisionBridgeLease, type ScreenVisionBridgeLease } from './screenVisionRequest.js';
+import { createVisionBridgeHttpMock, isVisionBridgeDummy, loadVisionBridgeDummy, type VisionBridgeDummy } from './screenVisionBridgeFake.js';
+import { isVisionMock, type OfflineVisionMock } from './qwenVisionMock.js';
 
 export const LIVE_VISION_DISABLED = true;
 export const LIVE_TEST_FLAG = '--desktop-companion-synthetic-vision-test';
@@ -106,11 +109,54 @@ export function createSyntheticVisionPilot(options: {
       if (Date.now() >= authorized.expiresAt) return fail('expired');
       if (signal?.aborted) return fail('cancelled');
       budget.claimed = true; // One attempt/process (or fake-driver identity), including terminal failures.
+      return runQwenVisionExchange({ request, fingerprint, authorized, options, blocked, diagnostics, offline, fetcher, signal,
+        setActive(value, expected) { if (!expected || active === expected) active = value; } });
+    },
+  };
+}
+
+/** Isolated FAKE-only adapter. No pilot permit/settings/vault/receipt and no native driver. */
+export async function executeOfflineScreenVisionExchange(lease: ScreenVisionBridgeLease, transport: OfflineVisionMock,
+  dummy: VisionBridgeDummy, signal: AbortSignal): Promise<{ result: LiveVisionResult; invocations: 0 | 1; httpStatus: number | null }> {
+  const stopped = (code: Code) => ({ result: fail(code), invocations: 0 as const, httpStatus: null });
+  if (app.isPackaged) return stopped('production');
+  if (process.type !== 'browser') return stopped('disabled');
+  if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') return stopped('tls-policy');
+  if (!isVisionMock(transport) || !isVisionBridgeDummy(dummy)) return stopped('authorization');
+  const wire = readScreenVisionBridgeLease(lease); if (!wire) return stopped('authorization');
+  const fingerprint = (url: string, body: unknown): string => createHash('sha256').update(url).update('\0').update(JSON.stringify(body)).digest('hex');
+  const authorized = { id: wire.scope.requestId, snapshot: fingerprint(wire.request.url, wire.request.body), expiresAt: wire.scope.expiresAt };
+  const diagnostics: VisionPilotDiagnostics = { postAttempts: 0, httpStatus: null, providerRequestId: null, returnedModel: null,
+    finishReason: null, reasoningTokens: null, usage: null, providerErrorCode: null, providerErrorCategory: null,
+    responseBytes: 0, totalDurationMs: null, postDurationMs: null, responseText: null };
+  let controller: AbortController | undefined;
+  const fetcher = createVisionBridgeHttpMock(transport, wire.scope.requestId, wire.request);
+  const result = await runQwenVisionExchange({
+    request: () => { const current = readScreenVisionBridgeLease(lease); return current ? { ok: true, request: current.request } : null; },
+    fingerprint, authorized, diagnostics, offline: true, fetcher, signal,
+    options: { vault: { load: () => loadVisionBridgeDummy(dummy, controller!.signal) } },
+    blocked: () => readScreenVisionBridgeLease(lease) ? null : 'authorization',
+    setActive(value) { controller = value; },
+  });
+  diagnostics.responseText = null; // No pilot diagnostic/answer cache for screen content.
+  return { result, invocations: diagnostics.postAttempts ? 1 : 0, httpStatus: diagnostics.httpStatus };
+}
+
+/** Shared original bounded Qwen execution; only the gated factories in this module call it. */
+async function runQwenVisionExchange(context: {
+  request: () => ReturnType<typeof buildVisionRequest> | null;
+  fingerprint: (url: string, body: unknown) => string;
+  authorized: { id: string; snapshot: string; expiresAt: number };
+  options: { vault: Pick<KeyVault, 'load'>; evidence?: PilotEvidence };
+  blocked: () => Code | null; diagnostics: VisionPilotDiagnostics; offline: boolean; fetcher: typeof fetch;
+  signal?: AbortSignal; setActive: (value: AbortController | undefined, expected?: AbortController) => void;
+}): Promise<LiveVisionResult> {
+  const { request, fingerprint, authorized, options, blocked, diagnostics, offline, fetcher, signal, setActive } = context;
       const started = performance.now(); let postStarted: number | undefined;
       let key: string | null = null, body: string | undefined;
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       let responseBody: ReadableStream<Uint8Array> | null = null;
-      const controller = new AbortController(); active = controller; let timedOut = false;
+      const controller = new AbortController(); setActive(controller); let timedOut = false;
       const cancel = (): void => controller.abort(); signal?.addEventListener('abort', cancel, { once: true });
       const timer = setTimeout(() => { timedOut = true; controller.abort(); }, LIVE_TEST_LIMITS.timeoutMs);
       try {
@@ -194,8 +240,6 @@ export function createSyntheticVisionPilot(options: {
         controller.abort();
         if (reader) { void reader.cancel().catch(() => {}); try { reader.releaseLock(); } catch {} }
         else if (responseBody) void responseBody.cancel().catch(() => {});
-        if (active === controller) active = undefined;
+        setActive(undefined, controller);
       }
-    },
-  };
 }

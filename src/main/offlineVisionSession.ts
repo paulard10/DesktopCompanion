@@ -6,7 +6,7 @@ import { OFFLINE_VISION_SCENARIOS, validVisionQuestion, VISION_SHARING, VISION_I
 import { SCREEN_SELECTION } from '../shared/screenSelection.js';
 import { buildVisionRequest, createOfflineVisionAdapter, VISION_MODEL_ID } from './qwenVisionAdapter.js';
 import { createVisionMock, isVisionMock, type OfflineVisionMock, type MockVisionScenario } from './qwenVisionMock.js';
-import { prepareScreenVisionRequest, executeScreenVisionMock } from './screenVisionRequest.js';
+import { prepareScreenVisionRequest, executeScreenVisionMock, confirmScreenVisionBridgeConsent } from './screenVisionRequest.js';
 import { exactKeys, record, validateVisionCrop, type ApprovedCrop } from './visionImage.js';
 
 // Placeholder satisfying the Singapore shape, NOT saved account configuration.
@@ -143,6 +143,7 @@ export function createOfflineVisionSession(options: {
       const mine = ++generation;
       const job = { controller: new AbortController(), requestId: permit.scope.requestId, fakeDispatches: 0 as 0 | 1 };
       screenJob = job;
+      confirmScreenVisionBridgeConsent(prepared.wire, () => !disposed && generation === mine && screenJob === job && Date.now() < previewExpiresAt);
       emit('screen-running', 'Simulating Qwen send locally. No external request, key lookup or recapture.',
         { screenAttempt: { requestId: job.requestId, consumed: true, fakeDispatches: 0 } });
       const pending = executeScreenVisionMock(prepared.wire, screenTransport ?? createVisionMock([script(scenario, SCREEN_SIMULATED_ANSWER)]), job.controller.signal, job);
