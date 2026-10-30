@@ -8,14 +8,15 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const bridgeProof = process.argv.includes('--offline-bridge'); // This standalone synthetic harness only; never an app activation flag.
+const gateProof = process.argv.includes('--offline-gate');
+const bridgeProof = gateProof || process.argv.includes('--offline-bridge'); // Standalone fake proofs only; never app activation flags.
 if (!process.versions.electron) {
   const tempRoot = fs.realpathSync(os.tmpdir());
   const directory = fs.mkdtempSync(path.join(tempRoot, 'companion-selection-proof-'));
   const env = { COMPANION_SELECTION_PROFILE: directory };
   for (const name of ['SystemRoot','WINDIR','TEMP','TMP','APPDATA','LOCALAPPDATA','USERPROFILE','PATH'])
     if (process.env[name] !== undefined) env[name] = process.env[name];
-  const child = spawn(process.execPath, [path.join(root, 'node_modules/electron/cli.js'), fileURLToPath(import.meta.url), ...(bridgeProof ? ['--offline-bridge'] : [])], {
+  const child = spawn(process.execPath, [path.join(root, 'node_modules/electron/cli.js'), fileURLToPath(import.meta.url), ...(gateProof ? ['--offline-gate'] : bridgeProof ? ['--offline-bridge'] : [])], {
     cwd: root, env, stdio: 'inherit', windowsHide: true,
   });
   const deadline = setTimeout(() => { console.error('selection-proof: timeout'); child.kill(); }, 30_000);
@@ -52,14 +53,26 @@ if (!process.versions.electron) {
   if (bridgeProof) {
     const requestModule = require('../dist/main/screenVisionRequest.js');
     const { createOfflineScreenVisionBridge } = require('../dist/main/screenVisionBridge.js');
+    const createGate = gateProof ? require('../dist/main/screenVisionGate.js').createScreenVisionGateOfflineTest : undefined;
     const { createVisionBridgeDummy, visionBridgeDummyStats } = require('../dist/main/screenVisionBridgeFake.js');
     const { createVisionMock, visionMockStats } = require('../dist/main/qwenVisionMock.js');
     requestModule.executeScreenVisionMock = async (wire, _legacy, signal, attempt) => {
       const fake = createVisionMock([bridgeScenario === 'timeout' ? { failure: 'pending' } : { status: 200, delayMs: 400,
         body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Offline bridge only. No visual understanding.' }, finish_reason: 'stop' }] }) }]);
-      const dummy = createVisionBridgeDummy(), bridge = createOfflineScreenVisionBridge({ transport: fake, dummy });
+      const dummy = createVisionBridgeDummy(), bridge = gateProof
+        ? createGate({ scope: 'privileged-screen-vision-offline-test', transport: fake, dummy })
+        : createOfflineScreenVisionBridge({ transport: fake, dummy });
       try {
-        const result = await bridge.run(wire, signal);
+        let result;
+        if (gateProof) {
+          assert.equal((await bridge.run(wire, undefined, signal)).code, 'authorization');
+          assert.equal(visionBridgeDummyStats(dummy).loads, 0); assert.equal(visionMockStats(fake).calls, 0);
+          const issued = bridge.issue(wire); assert.equal(issued.ok, true);
+          assert.equal(visionBridgeDummyStats(dummy).loads, 0); assert.equal(visionMockStats(fake).calls, 0);
+          const pending = bridge.run(wire, issued.capability, signal);
+          assert.equal((await bridge.run(wire, issued.capability, signal)).code, 'duplicate');
+          result = await pending;
+        } else result = await bridge.run(wire, signal);
         assert.ok(visionBridgeDummyStats(dummy).loads <= 1); assert.ok(visionMockStats(fake).calls <= 1);
         if (result.ok) { assert.equal(visionBridgeDummyStats(dummy).loads, 1); assert.equal(visionMockStats(fake).calls, 1); }
         assert.equal(result.evidence.transport, 'closed-fake');
@@ -252,7 +265,7 @@ if (!process.versions.electron) {
           assert.equal(e.sender, win.webContents); assert.equal(id, payload.sessionId);
           visualSession.dispose();
           if (bridgeProof) assert.equal(bridgeChecks, 2);
-          finish(true, `native crop at 100/125/150%; separate screen review/confirmation, ${bridgeProof ? 'shared HTTP bridge/dummy credentials' : 'shared builder/closed fake'}, duplicate/cancel/discard; real-send disabled; zero external/credential/capture attempts`);
+          finish(true, `native crop at 100/125/150%; separate screen review/confirmation, ${gateProof ? 'independent fake Gate B/shared bridge/dummy credentials' : bridgeProof ? 'shared HTTP bridge/dummy credentials' : 'shared builder/closed fake'}, duplicate/cancel/discard; real-send disabled; zero external/credential/capture attempts`);
         });
         await evaluate(`document.querySelector('#cancel').click()`);
       } catch (error) { finish(false, error.message); }

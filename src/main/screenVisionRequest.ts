@@ -31,6 +31,10 @@ export interface ScreenVisionBridgeLease { readonly purpose: 'offline-screen-bri
 const leases = new WeakMap<ScreenVisionBridgeLease, ScreenVisionWireRequest>();
 /** Read-only main evidence; never mints/resets consent or exposes the request. */
 export const screenVisionBridgeAttemptConsumed = (wire: ScreenVisionWireRequest): boolean => prepared.get(wire)?.consumed ?? false;
+/** Read-only Gate A check for isolated fake-capability issuance; grants no dispatch. */
+export function screenVisionBridgeConsentActive(wire: ScreenVisionWireRequest): boolean {
+  return !prepared.get(wire)?.consumed && currentConfirmedRequest(wire, 'before-dispatch') !== null;
+}
 /** Called ONLY after the existing owned session validated/consumed its review token. */
 export function confirmScreenVisionBridgeConsent(wire: ScreenVisionWireRequest, active: () => boolean): boolean {
   const s = prepared.get(wire);
@@ -54,7 +58,10 @@ export function claimScreenVisionBridgeAttempt(wire: ScreenVisionWireRequest, si
 }
 /** Rechecked before/after dummy acquisition, so disposal or mutation cannot dispatch. */
 export function readScreenVisionBridgeLease(lease: ScreenVisionBridgeLease, phase: 'before-dispatch' | 'response' = 'before-dispatch'): ScreenVisionWireRequest | null {
-  const wire = leases.get(lease), s = wire && prepared.get(wire);
+  return currentConfirmedRequest(leases.get(lease), phase);
+}
+function currentConfirmedRequest(wire: ScreenVisionWireRequest | undefined, phase: 'before-dispatch' | 'response'): ScreenVisionWireRequest | null {
+  const s = wire && prepared.get(wire);
   if (!wire || !s?.confirmed || Date.now() >= wire.scope.previewExpiresAt ||
       (phase === 'before-dispatch' && Date.now() >= wire.scope.expiresAt)) return null;
   try {
