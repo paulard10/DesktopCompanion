@@ -233,3 +233,124 @@ test('screen pipeline produces no console, file, clipboard or chat/TTS handoff',
   const f=setup(t);f.edit('INVENTED_PRIVATE_MARKER');f.review();f.confirm();await f.tick();f.session.dispose();assert.deepEqual(logs,[]);
   assert.equal(f.last().sharing.remoteStatus,'unavailable');
 });
+
+// M3.4b.4d: exercise the existing dispatch seam directly, never the live pilot.
+test('preparation preserves typed image, question and endpoint failures without entering transport',t=>{
+  const f=setup(t);f.edit();f.review();const scope=f.last().screenReview;
+  const endpoint='https://offline-ux.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1';
+  const invalid={...f.crop,bytes:Buffer.alloc(20)};
+  assert.deepEqual(wireModule.prepareScreenVisionRequest(invalid,{...scope,pngBytes:20},endpoint),{ok:false,code:'invalid-image'});
+  assert.deepEqual(wireModule.prepareScreenVisionRequest(f.crop,{...scope,question:'x'.repeat(501)},endpoint),{ok:false,code:'invalid-question'});
+  assert.deepEqual(wireModule.prepareScreenVisionRequest(f.crop,scope,'https://example.invalid/'),{ok:false,code:'invalid-endpoint'});
+  assert.equal(visionMockStats(f.handle).calls,0);assert.equal(f.notices.some(n=>n.phase==='screen-running'),false);
+});
+function preparedAttempt(t:any,script?:any[],reviewAt=0){
+  const f=setup(t,script);t.mock.timers.tick(reviewAt);f.edit();f.review();
+  const built=wireModule.prepareScreenVisionRequest(f.crop,f.last().screenReview,
+    'https://offline-ux.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1');
+  assert.equal(built.ok,true);const wire=built.wire,controller=new AbortController(),attempt={fakeDispatches:0};
+  t.after(()=>controller.abort());
+  return{...f,wire,controller,attempt,run:()=>wireModule.executeScreenVisionMock(wire,f.handle,controller.signal,attempt)};
+}
+test('prepared fake success has immutable, explicitly synthetic execution evidence',async t=>{
+  const f=preparedAttempt(t);const pending=f.run();await f.tick();const result=await pending;
+  assert.equal(result.ok,true);assert.equal(result.kind,'simulated-qwen-response');
+  assert.deepEqual(result.evidence,{transport:'closed-fake',attemptConsumed:true,fakeDispatches:1,httpStatus:200});
+  assert.ok(Object.isFrozen(result));assert.ok(Object.isFrozen(result.evidence));
+  assert.equal(result.usage,undefined);assert.equal(result.cost,undefined);assert.equal(result.latency,undefined);
+});
+test('prepared provenance rejects copies, self-signed objects and invalid inputs before transport',async t=>{
+  const f=preparedAttempt(t);
+  for(const wire of [{...f.wire},JSON.parse(JSON.stringify(f.wire)),{},null,undefined]){
+    const result=await wireModule.executeScreenVisionMock(wire,f.handle,f.controller.signal,{fakeDispatches:0});
+    assert.equal(result.ok,false);assert.equal(result.code,'authorization');
+    assert.deepEqual(result.evidence,{transport:'closed-fake',attemptConsumed:false,fakeDispatches:0,httpStatus:null});
+  }
+  assert.equal(visionMockStats(f.handle).calls,0);
+  const pending=f.run();await f.tick();assert.equal((await pending).ok,true);assert.equal(visionMockStats(f.handle).calls,1);
+});
+for(const field of ['question','image','endpoint','model','purpose','limits'])
+  test(`recomputing a renderer-like fingerprint cannot reseal a changed prepared ${field}`,async t=>{
+    const f=preparedAttempt(t),w=f.wire;
+    if(field==='question')w.request.body.messages[1].content[0].text='changed';
+    if(field==='image')w.request.body.messages[1].content[1].image_url.url='data:image/png;base64,AAAA';
+    if(field==='endpoint')w.request.url='https://other.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions';
+    if(field==='model')w.request.body.model='other';
+    if(field==='purpose')w.scope={...w.scope,purpose:'one-synthetic-vision-request'};
+    if(field==='limits')w.request.body.max_completion_tokens=999;
+    w.fingerprint=require('node:crypto').createHash('sha256').update(JSON.stringify({scope:w.scope,request:w.request})).digest('hex');
+    const result=await f.run();assert.equal(result.code,'invalid-request');
+    assert.equal(result.evidence.attemptConsumed,true);assert.equal(result.evidence.fakeDispatches,0);
+    assert.equal(visionMockStats(f.handle).calls,0);
+    assert.equal((await f.run()).code,'duplicate');
+  });
+test('consumed prepared identity cannot replay by resetting the caller counter',async t=>{
+  const f=preparedAttempt(t);const pending=f.run();await f.tick();await pending;
+  f.attempt.fakeDispatches=0;const result=await f.run();
+  assert.equal(result.code,'duplicate');assert.equal(result.evidence.attemptConsumed,true);
+  assert.equal(result.evidence.fakeDispatches,1);assert.equal(visionMockStats(f.handle).calls,1);
+});
+test('prepared executor refuses a fabricated fake handle or a network callback',async t=>{
+  const f=preparedAttempt(t);
+  for(const driver of [{mode:'offline-scripted'},globalThis.fetch,()=>Promise.resolve({})]){
+    const result=await wireModule.executeScreenVisionMock(f.wire,driver,f.controller.signal,f.attempt);
+    assert.equal(result.code,'invalid-request');assert.equal(result.evidence.attemptConsumed,false);
+  }
+  assert.equal(visionMockStats(f.handle).calls,0);
+});
+for(const [elapsed,code]of [[30000,'expired'],[120000,'session-expired']]as const)
+  test(`prepared ${code} is distinguished before fake dispatch`,async t=>{
+    const f=preparedAttempt(t);t.mock.timers.tick(elapsed);const result=await f.run();
+    assert.equal(result.code,code);assert.equal(result.outcome,'failed');
+    assert.deepEqual(result.evidence,{transport:'closed-fake',attemptConsumed:true,fakeDispatches:0,httpStatus:null});
+    assert.equal(visionMockStats(f.handle).calls,0);
+  });
+for(const sessionExpiry of [false,true])test(`expiry at the async dispatch gap (${sessionExpiry?'session':'review'}) sends nothing`,async t=>{
+  const f=preparedAttempt(t,undefined,sessionExpiry?119999:0);
+  if(!sessionExpiry)t.mock.timers.tick(29999);
+  const pending=f.run();t.mock.timers.tick(1);await flush();const result=await pending;
+  assert.equal(result.code,sessionExpiry?'session-expired':'expired');
+  assert.equal(result.evidence.attemptConsumed,true);assert.equal(result.evidence.fakeDispatches,0);
+  assert.equal(visionMockStats(f.handle).calls,0);
+});
+test('cancel before the fake boundary is consumed with zero invocations',async t=>{
+  const f=preparedAttempt(t);const pending=f.run();f.controller.abort();await flush();const result=await pending;
+  assert.equal(result.code,'cancelled');assert.equal(result.outcome,'cancelled');
+  assert.equal(result.evidence.fakeDispatches,0);assert.equal(result.evidence.attemptConsumed,true);
+  assert.equal(visionMockStats(f.handle).calls,0);
+});
+test('cancel after the fake boundary retains one invocation and no HTTP evidence',async t=>{
+  const f=preparedAttempt(t,[{failure:'pending'}]);const pending=f.run();await flush();f.controller.abort();await flush();
+  const result=await pending;assert.equal(result.code,'cancelled');assert.equal(result.outcome,'cancelled');
+  assert.deepEqual(result.evidence,{transport:'closed-fake',attemptConsumed:true,fakeDispatches:1,httpStatus:null});
+  assert.equal((await f.run()).code,'duplicate');assert.equal(visionMockStats(f.handle).calls,1);
+});
+test('timeout after fake dispatch is UNKNOWN with a consumed attempt and no retry',async t=>{
+  const f=preparedAttempt(t,[{failure:'pending'}]);const pending=f.run();await f.tick(20000);const result=await pending;
+  assert.equal(result.code,'timeout');assert.equal(result.outcome,'unknown');assert.equal(result.evidence.httpStatus,null);
+  assert.equal(result.evidence.fakeDispatches,1);assert.equal(result.evidence.attemptConsumed,true);
+  assert.equal((await f.run()).code,'duplicate');assert.equal(visionMockStats(f.handle).calls,1);
+});
+for(const [status,code]of [[400,'invalid'],[401,'authentication'],[429,'rate-limit'],[500,'unavailable']]as const)
+  test(`fake HTTP ${status} is a known failure with synthetic status evidence`,async t=>{
+    const f=preparedAttempt(t,[{status,body:'{}',delayMs:10}]);const pending=f.run();await f.tick();const result=await pending;
+    assert.equal(result.code,code);assert.equal(result.outcome,'failed');
+    assert.deepEqual(result.evidence,{transport:'closed-fake',attemptConsumed:true,fakeDispatches:1,httpStatus:status});
+    assert.equal(visionMockStats(f.handle).calls,1);
+  });
+for(const [body,code]of [['{','malformed'],[reply('  '),'empty'],
+  [JSON.stringify({choices:[{message:{role:'assistant',content:'x',tool_calls:[]},finish_reason:'stop'}]}),'malformed']]as const)
+  test(`fake 200 ${code} body cannot become a successful provider answer`,async t=>{
+    const f=preparedAttempt(t,[{status:200,body,delayMs:10}]);const pending=f.run();await f.tick();const result=await pending;
+    assert.equal(result.ok,false);assert.equal(result.code,code);assert.equal(result.outcome,'failed');
+    assert.equal(result.evidence.transport,'closed-fake');assert.equal(result.evidence.httpStatus,200);
+    assert.equal(result.text,undefined);assert.equal(result.kind,undefined);
+  });
+for(const scenario of [{failure:'unavailable',delayMs:10},
+  {status:200,body:reply('wrong request'),replyTo:'foreign',delayMs:10}])
+  test(`incomplete fake evidence (${('failure'in scenario)?'unavailable':'foreign correlation'}) is UNKNOWN`,async t=>{
+    const f=preparedAttempt(t,[scenario]);const pending=f.run();await f.tick();const result=await pending;
+    assert.equal(result.ok,false);assert.equal(result.outcome,'unknown');assert.equal(result.evidence.httpStatus,null);
+    assert.equal(result.evidence.fakeDispatches,1);assert.equal(result.evidence.attemptConsumed,true);
+    assert.equal(visionMockStats(f.handle).calls,1);assert.equal((await f.run()).code,'duplicate');
+  });
