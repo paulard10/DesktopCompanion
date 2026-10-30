@@ -1,10 +1,12 @@
 /** Main-owned temporary crop + single-use LOCAL SIMULATION approval. No I/O. */
 import { createHash, randomUUID } from 'node:crypto';
 import { OFFLINE_VISION_SCENARIOS, validVisionQuestion, VISION_SHARING, VISION_IMAGE_UNAVAILABLE,
+  SCREEN_VISION_POLICY, SCREEN_VISION_SIMULATED_LABEL, type ScreenVisionReview,
   type OfflineVisionNotice, type OfflineVisionScenario, type OfflineVisionReview, type VisionImageEligibility } from '../shared/offlineVision.js';
 import { SCREEN_SELECTION } from '../shared/screenSelection.js';
 import { buildVisionRequest, createOfflineVisionAdapter, VISION_MODEL_ID } from './qwenVisionAdapter.js';
-import { createVisionMock, type MockVisionScenario } from './qwenVisionMock.js';
+import { createVisionMock, isVisionMock, type OfflineVisionMock, type MockVisionScenario } from './qwenVisionMock.js';
+import { prepareScreenVisionRequest, executeScreenVisionMock } from './screenVisionRequest.js';
 import { exactKeys, record, validateVisionCrop, type ApprovedCrop } from './visionImage.js';
 
 // Placeholder satisfying the Singapore shape, NOT saved account configuration.
@@ -13,11 +15,15 @@ const ENDPOINT = 'https://offline-ux.ap-southeast-1.maas.aliyuncs.com/compatible
 export const OFFLINE_APPROVAL_MS = 30_000;
 export const SIMULATED_ANSWER = 'Simulated response — no AI was called. No visual understanding was performed. '
   + 'This offline test does not describe or interpret your image. Nothing was sent outside this device.';
-function script(scenario: OfflineVisionScenario): MockVisionScenario {
+export const SCREEN_SIMULATED_ANSWER = `${SCREEN_VISION_SIMULATED_LABEL} No visual understanding was performed. This rehearsal does not interpret your crop.`;
+function script(scenario: OfflineVisionScenario, answer = SIMULATED_ANSWER): MockVisionScenario {
   if (scenario === 'timeout') return { failure: 'pending' };
-  if (scenario === 'rate-limit') return { status: 429, body: '{}', delayMs: 400 };
+  if (scenario === 'unknown') return { failure: 'unavailable', delayMs: 400 };
+  const statuses: Partial<Record<OfflineVisionScenario, number>> = { 'rate-limit': 429, 'bad-request': 400, unauthorized: 401, 'server-error': 500 };
+  const status = statuses[scenario];
+  if (status) return { status, body: '{}', delayMs: 400 };
   return { status: 200, delayMs: 400, body: JSON.stringify({ choices: [{
-    message: { role: 'assistant', content: scenario === 'empty' ? '' : SIMULATED_ANSWER }, finish_reason: 'stop',
+    message: { role: 'assistant', content: scenario === 'empty' ? '' : answer }, finish_reason: 'stop',
   }] }) };
 }
 export interface OfflineVisionSession {
@@ -27,10 +33,14 @@ export interface OfflineVisionSession {
 /** Caller transfers exclusive ownership of this canonical crop; never renderer bytes. */
 export function createOfflineVisionSession(options: {
   sessionId: string; crop: ApprovedCrop; expiresAt?: number; publish: (notice: OfflineVisionNotice) => void;
+  /** Trusted tests can supply only an opaque registered mock, never a callback. */
+  screenTransport?: OfflineVisionMock;
 }): OfflineVisionSession {
   let crop: ApprovedCrop | undefined = Object.freeze({ ...options.crop });
   // Clear factory input references too; dispose must not retain a hidden owner.
   const sessionId = options.sessionId, publish = options.publish;
+  const screenTransport = options.screenTransport;
+  if (screenTransport !== undefined && !isVisionMock(screenTransport)) throw new Error('Only a registered screen mock is allowed.');
   const previewExpiresAt = options.expiresAt ?? Date.now() + SCREEN_SELECTION.sessionMs;
   if (!Number.isSafeInteger(previewExpiresAt) || previewExpiresAt > Date.now() + SCREEN_SELECTION.sessionMs)
     throw new Error('Invalid preview lifetime.');
@@ -44,11 +54,16 @@ export function createOfflineVisionSession(options: {
   let disposed = false, generation = 0;
   let adapter: ReturnType<typeof createOfflineVisionAdapter> | undefined;
   let approval: Readonly<OfflineVisionReview> & { token: string; digest: string; scenario: OfflineVisionScenario } | undefined;
+  let screenApproval: { token: string; scope: Readonly<ScreenVisionReview>; fingerprint: string; digest: string; scenario: OfflineVisionScenario } | undefined;
+  let screenJob: { controller: AbortController; requestId: string; fakeDispatches: 0 | 1 } | undefined;
   const emit = (phase: OfflineVisionNotice['phase'], message: string, extra: Partial<OfflineVisionNotice> = {}): void => {
     if (!disposed) publish({ phase, question, revision, scenario, imageId, message,
       sharing: VISION_SHARING, imageEligibility, previewExpiresAt, ...extra });
   };
-  const revoke = (): void => { approval = undefined; generation++; adapter?.cancel(); adapter = undefined; };
+  const revoke = (): void => {
+    approval = undefined; screenApproval = undefined; generation++; adapter?.cancel(); adapter = undefined;
+    screenJob?.controller.abort(); // Keep ownership until its promise settles; never overlap attempts.
+  };
   const input = () => ({ endpoint: ENDPOINT, model: VISION_MODEL_ID, question, image: crop });
   const withinBudget = (): boolean => {
     const built = buildVisionRequest(input()); // Same strict adapter validator. Snapshot dies here.
@@ -66,9 +81,13 @@ export function createOfflineVisionSession(options: {
       revoke(); emit('error', 'Local preview expired. Discard and start a new selection. Nothing was sent.'); dispose(); return;
     }
     if (action.type === 'cancel' && exactKeys(action, ['type','sessionId'])) {
-      revoke(); emit('editing', 'Offline review or test cancelled. Review again to authorize another simulation.'); return;
+      const attempt = screenJob;
+      revoke(); emit('editing', attempt ? 'Screen rehearsal cancelled. Nothing was uploaded. A future real request already dispatched could still be processed or billed.'
+        : 'Offline review or test cancelled. Review again to authorize another simulation.', attempt ? {
+          screenOutcome: 'cancelled', screenAttempt: { requestId: attempt.requestId, consumed: true, fakeDispatches: attempt.fakeDispatches },
+        } : {}); return;
     }
-    if ((action.type === 'edit' || action.type === 'review') &&
+    if ((action.type === 'edit' || action.type === 'review' || action.type === 'review-screen-dry-run') &&
         exactKeys(action, ['type','sessionId','question','revision','scenario'])) {
       if (!Number.isSafeInteger(action.revision) || (action.revision as number) < 1 ||
           typeof action.question !== 'string' ||
@@ -83,10 +102,23 @@ export function createOfflineVisionSession(options: {
         emit('editing', 'Local only. Review this exact image and question before authorizing a simulation.'); return;
       }
       // No review can mutate a draft or silently reauthorize a running operation.
-      if (adapter || action.revision !== revision || action.question !== question || action.scenario !== scenario) return;
+      if (adapter || screenJob || action.revision !== revision || action.question !== question || action.scenario !== scenario) return;
       revoke();
       if (!validVisionQuestion(question)) { emit('error', 'Enter a non-empty valid question of at most 500 characters.'); return; }
       if (!imageEligibility.available) { emit('error', imageEligibility.message); return; }
+      if (action.type === 'review-screen-dry-run') {
+        const scope: Readonly<ScreenVisionReview> = Object.freeze({ purpose: SCREEN_VISION_POLICY.purpose,
+          sessionId, imageId, requestId: randomUUID(), question, revision,
+          provider: VISION_SHARING.provider, region: VISION_SHARING.region, model: VISION_MODEL_ID,
+          endpointPolicy: SCREEN_VISION_POLICY.endpointPolicy, mime: 'image/png', width: crop.width, height: crop.height,
+          pngBytes: crop.bytes.byteLength, expiresAt: Math.min(Date.now() + OFFLINE_APPROVAL_MS, previewExpiresAt),
+          previewExpiresAt, outputTokens: 160, timeoutMs: 20000, responseBytes: 65536 });
+        const prepared = prepareScreenVisionRequest(crop, scope, ENDPOINT);
+        if (!prepared.ok) { emit('error', VISION_IMAGE_UNAVAILABLE); return; }
+        screenApproval = { scope, fingerprint: prepared.wire.fingerprint, digest, scenario, token: `screen-review-${randomUUID()}` };
+        emit('screen-review', 'Offline rehearsal: review the exact crop/question and future external-sharing notice. Confirming permits one FAKE dispatch only. Real sending remains unavailable.',
+          { screenReview: scope, screenToken: screenApproval.token }); return;
+      }
       if (!withinBudget()) return;
       const binding: Readonly<OfflineVisionReview> = Object.freeze({ purpose: 'offline-simulation-only', sessionId, imageId,
         question, revision, provider: VISION_SHARING.provider, region: VISION_SHARING.region, model: VISION_MODEL_ID,
@@ -96,7 +128,39 @@ export function createOfflineVisionSession(options: {
       emit('review', 'Review the image shown above and the exact question below. This approval permits one local simulation only; it never permits upload.',
         { token: approval.token, expiresAt: approval.expiresAt, review: binding }); return;
     }
-    if (action.type !== 'run' || !exactKeys(action, ['type','sessionId','token','revision']) || adapter) return;
+    if (action.type === 'confirm-screen-dry-run' && exactKeys(action, ['type','sessionId','token','revision'])) {
+      if (adapter || screenJob || !screenApproval || action.token !== screenApproval.token || action.revision !== screenApproval.scope.revision) return;
+      const permit = screenApproval; screenApproval = undefined; // Consume before any await/dispatch, including failed attempts.
+      if (Date.now() >= permit.scope.expiresAt || permit.scope.sessionId !== sessionId || permit.scope.imageId !== imageId ||
+          permit.scope.question !== question || permit.scope.revision !== revision || permit.scenario !== scenario ||
+          permit.digest !== createHash('sha256').update(crop.bytes).digest('hex')) {
+        revoke(); emit('editing', 'Screen rehearsal review expired or changed. Review again; nothing was sent.'); return;
+      }
+      let prepared = prepareScreenVisionRequest(crop, permit.scope, ENDPOINT);
+      if (!prepared.ok || prepared.wire.fingerprint !== permit.fingerprint) {
+        revoke(); emit('error', 'Screen rehearsal request changed. Nothing was sent.'); return;
+      }
+      const mine = ++generation;
+      const job = { controller: new AbortController(), requestId: permit.scope.requestId, fakeDispatches: 0 as 0 | 1 };
+      screenJob = job;
+      emit('screen-running', 'Simulating Qwen send locally. No external request, key lookup or recapture.',
+        { screenAttempt: { requestId: job.requestId, consumed: true, fakeDispatches: 0 } });
+      const pending = executeScreenVisionMock(prepared.wire, screenTransport ?? createVisionMock([script(scenario, SCREEN_SIMULATED_ANSWER)]), job.controller.signal, job);
+      prepared = undefined as unknown as typeof prepared;
+      void pending.then(result => {
+        if (disposed || generation !== mine || screenJob !== job) return;
+        if (Date.now() >= previewExpiresAt) { dispose(); return; }
+        const extra = { screenAttempt: { requestId: job.requestId, consumed: true as const, fakeDispatches: job.fakeDispatches } };
+        if (result.ok) emit('screen-result', SCREEN_VISION_SIMULATED_LABEL, { ...extra, answer: result.text, screenOutcome: 'completed' });
+        else emit('screen-error', `Simulated screen outcome: ${result.outcome} (${result.code}). No real upload. No retry; fresh review is required.`,
+          { ...extra, screenOutcome: result.outcome });
+      }).catch(() => {
+        if (!disposed && generation === mine && screenJob === job && Date.now() < previewExpiresAt)
+          emit('screen-error', 'Simulated outcome UNKNOWN. No real upload or retry.', { screenOutcome: 'unknown' });
+      }).finally(() => { if (screenJob === job) screenJob = undefined; });
+      return;
+    }
+    if (action.type !== 'run' || !exactKeys(action, ['type','sessionId','token','revision']) || adapter || screenJob) return;
     const permit = approval;
     if (!permit || action.token !== permit.token || action.revision !== permit.revision) return;
     approval = undefined; // Consume BEFORE starting any asynchronous operation.

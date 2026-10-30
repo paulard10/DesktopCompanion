@@ -270,3 +270,27 @@ test('controller session lifetime includes selection time, not a fresh 120 secon
   t.mock.timers.tick(30_000);assert.equal(f.win().destroyed,true);assert.equal(f.c.active(),false);
   f.emit('vision',{type:'run',sessionId:id,token,revision:2});assert.equal(f.win().webContents.sent.some(n=>n.payload.vision?.phase==='running'),false);
 });
+
+test('owned preview IPC rehearses screen consent and rejects foreign/live actions',async t=>{
+  let external=0;t.mock.method(globalThis,'fetch',()=>{external++;throw Error('No live provider');});
+  const f=fixture(t);enableVisionCrop();f.begin();f.select();f.confirm();await settle();const n=f.notice(),id=n.sessionId;
+  const edit={type:'edit',sessionId:id,question:'Only invented pixels',revision:2,scenario:'success'};
+  f.emit('vision',edit);const review={...edit,type:'review-screen-dry-run'},count=f.win().webContents.sent.length;
+  for(const event of [{sender:{},senderFrame:f.event().senderFrame},{...f.event(),senderFrame:{parent:null,url:SELECTION_PAGE}},
+    {...f.event(),senderFrame:{parent:{},url:SELECTION_PAGE}}])ipc.emit('selection:vision',event,review);
+  f.emit('vision',{...review,sessionId:'old'});f.emit('vision',review,'extra');assert.equal(f.win().webContents.sent.length,count);
+  f.emit('vision',review);assert.equal(f.notice().vision.phase,'screen-review');const token=f.notice().vision.screenToken;
+  assert.equal(f.notice().vision.screenReview.imageId,n.vision.imageId);assert.equal(f.notice().vision.screenReview.question,edit.question);
+  f.emit('vision',{type:'send-screen-live',sessionId:id,token,revision:2});assert.equal(f.notice().vision.phase,'screen-review');
+  for(let i=0;i<2;i++)f.emit('vision',{type:'confirm-screen-dry-run',sessionId:id,token,revision:2});await new Promise(r=>setTimeout(r,450));
+  assert.equal(f.notice().vision.phase,'screen-result');assert.match(f.notice().vision.message,/Simulated Qwen response/);
+  assert.equal(f.win().webContents.sent.filter(n=>n.payload.vision?.phase==='screen-running').length,1);
+  assert.equal(requests.length,1);assert.equal(external,0);f.emit('cancel',id);assert.equal(f.win().destroyed,true);
+});
+test('closing a real controller preview while screen rehearsal is pending cannot recreate it',async t=>{
+  const f=fixture(t);enableVisionCrop();f.begin();f.select();f.confirm();await settle();const id=f.notice().sessionId;
+  for(const type of ['edit','review-screen-dry-run'])f.emit('vision',{type,sessionId:id,question:'Invented',revision:2,scenario:'timeout'});
+  f.emit('vision',{type:'confirm-screen-dry-run',sessionId:id,token:f.notice().vision.screenToken,revision:2});await settle();
+  const old=f.win();f.emit('cancel',id);const count=old.webContents.sent.length;await settle();
+  assert.equal(old.destroyed,true);assert.equal(f.c.active(),false);assert.equal(old.webContents.sent.length,count);assert.equal(requests.length,1);
+});

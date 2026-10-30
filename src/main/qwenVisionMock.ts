@@ -1,4 +1,5 @@
-/** Closed scripted transport: no fetch, credentials, sockets, callbacks or URLs. */
+/** Closed scripted transport: no fetch, credentials, sockets or callback driver. */
+import type { ScreenVisionWireRequest } from './screenVisionRequest.js';
 export type MockVisionScenario = {
   status: number; body: string; delayMs?: number; replyTo?: string;
 } | { failure: 'unavailable' | 'pending'; delayMs?: number };
@@ -34,6 +35,15 @@ export function visionMockStats(handle: OfflineVisionMock): { calls: number; act
   const state = mocks.get(handle);
   if (!state) throw new Error('Invalid offline transport.');
   return { calls: state.calls, active: state.active, remaining: state.script.length };
+}
+
+/** Final FAKE request boundary. A test may inspect the argument synchronously;
+ * production never caches the request, pixels or Base64 and has no HTTP driver. */
+export function exchangeVisionRequestMock(handle: OfflineVisionMock, request: ScreenVisionWireRequest,
+  signal: AbortSignal): Promise<MockVisionReply> {
+  const id = request.scope.requestId;
+  request = undefined as unknown as ScreenVisionWireRequest;
+  return exchangeVisionMock(handle, id, signal);
 }
 
 /** No request body retained or routed anywhere; only a correlation ID is needed. */

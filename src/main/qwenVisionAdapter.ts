@@ -49,9 +49,9 @@ export interface BuiltVisionRequest { url: string; body: VisionRequestBody; body
 export type VisionBuild = { ok: true; request: BuiltVisionRequest } | Extract<VisionResult, { ok: false }>;
 
 /** Pure request construction. No key, fetch, settings read or send side effect. */
-export function buildVisionRequest(input: unknown, profile: 'offline' | 'synthetic-live-test' = 'offline'): VisionBuild {
+export function buildVisionRequest(input: unknown, profile: 'offline' | 'synthetic-live-test' | 'screen-vision' = 'offline'): VisionBuild {
   try {
-    if (profile !== 'offline' && profile !== 'synthetic-live-test') return failure('invalid-request');
+    if (!['offline', 'synthetic-live-test', 'screen-vision'].includes(profile)) return failure('invalid-request');
     if (!record(input) || !exactKeys(input, ['endpoint','model','question','image'])) return failure('invalid-request');
     if (input.model !== VISION_MODEL_ID) return failure('unsupported-model');
     const url = typeof input.endpoint === 'string' && input.endpoint.length <= 300 ? chatCompletionsUrl(input.endpoint) : null;
@@ -64,7 +64,7 @@ export function buildVisionRequest(input: unknown, profile: 'offline' | 'synthet
       { role: 'system', content: VISION_SYSTEM_PROMPT },
       { role: 'user', content: [{ type: 'text', text: question }, { type: 'image_url', image_url: { url: image } }] },
     ], stream: false, enable_thinking: false,
-      ...(profile === 'synthetic-live-test' ? { max_completion_tokens: 160 } : { max_tokens: VISION_LIMITS.outputTokens }) };
+      ...(profile !== 'offline' ? { max_completion_tokens: 160 } : { max_tokens: VISION_LIMITS.outputTokens }) };
     const bodyBytes = Buffer.byteLength(JSON.stringify(body), 'utf8');
     if (bodyBytes > VISION_LIMITS.jsonBytes) return failure('invalid-request');
     return { ok: true, request: { url, body, bodyBytes } };

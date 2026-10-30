@@ -20,8 +20,9 @@
     <textarea id="question" maxlength="500" rows="2" placeholder="Write your own question" aria-describedby="question-count vision-status"></textarea>
     <span id="question-count">0 / 500</span>
     <label for="scenario">Simulated outcome</label>
-    <select id="scenario"><option value="success">Success (no image understanding)</option><option value="empty">Empty response</option><option value="rate-limit">Rate limit</option><option value="timeout">Timeout</option></select>
+    <select id="scenario"><option value="success">Success (no image understanding)</option><option value="empty">Empty response</option><option value="rate-limit">Rate limit</option><option value="timeout">Timeout</option><option value="bad-request">HTTP 400</option><option value="unauthorized">HTTP 401</option><option value="server-error">HTTP 500</option><option value="unknown">Unknown outcome</option></select>
     <button id="review-question" type="button" disabled>Review question</button>
+    <button id="review-screen-send" type="button" disabled>Review Qwen send (offline)</button>
     <div id="vision-review" hidden>
       <strong>Review selected screen area and question</strong>
       <p>The image above is the exact crop used. Only a local simulation is authorized. Nothing will leave this device.</p>
@@ -37,6 +38,7 @@
         <button id="send-remote" type="button" disabled aria-describedby="remote-boundary">Send to Qwen — unavailable</button>
       </aside>
       <button id="run-offline" type="button">Run offline vision test</button>
+      <button id="confirm-screen-send" type="button" hidden disabled>Simulate Qwen send (offline)</button>
     </div>
     <button id="cancel-vision" type="button" hidden>Cancel review / test</button>
     <p id="vision-status" role="status" aria-live="polite"></p>

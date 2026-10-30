@@ -53,7 +53,7 @@ if (!process.versions.electron) {
   // Make any accidental real desktop request an immediate test failure.
   desktopCapturer.getSources = () => { captureAttempts++; throw new Error('Real desktop capture forbidden in synthetic proof'); };
   let win, visualSession, finished = false, processCountBeforeWindow = 0;
-  let visionOperations = 0, lastRun;
+  let visionOperations = 0, screenOperations = 0, lastRun;
   const deadline = setTimeout(() => finish(false, 'deadline'), 15_000);
   function finish(ok, detail = '') {
     if (finished) return; finished = true; clearTimeout(deadline);
@@ -127,6 +127,7 @@ if (!process.versions.electron) {
             x: 30, y: 45, sourceWidth: 240, sourceHeight: 180 },
           publish(vision) {
             if (vision.phase === 'running') visionOperations++;
+            if (vision.phase === 'screen-running') screenOperations++;
             win.webContents.send('selection:notice', { ...payload, vision });
           },
         });
@@ -195,12 +196,40 @@ if (!process.versions.electron) {
         await evaluate(`document.querySelector('#cancel-vision').click()`);
         await until(`!document.querySelector('#question').disabled`);
         assert.equal(await evaluate(`document.querySelector('#vision-answer').hidden`), true);
+        // Separate screen-rehearsal review/confirmation through the unchanged bridge.
+        await evaluate(`{
+          const s=document.querySelector('#scenario');s.value='success';s.dispatchEvent(new Event('change',{bubbles:true}));
+        }`);
+        await until(`!document.querySelector('#review-screen-send').disabled`);
+        await evaluate(`document.querySelector('#review-screen-send').click()`);
+        await until(`!document.querySelector('#confirm-screen-send').hidden && !document.querySelector('#confirm-screen-send').disabled`);
+        assert.equal(await evaluate(`document.querySelector('#review-text').textContent`), 'Pregunta editada');
+        assert.equal(await evaluate(`document.querySelector('#crop').src`), previewBlob);
+        assert.equal(await evaluate(`document.querySelector('#run-offline').hidden && document.querySelector('#send-remote').disabled`), true);
+        assert.equal(screenOperations, 0);
+        await evaluate(`document.querySelector('#confirm-screen-send').click();document.querySelector('#confirm-screen-send').click()`);
+        await until(`!document.querySelector('#vision-answer').hidden`);
+        assert.equal(screenOperations, 1);
+        assert.match(await evaluate(`document.querySelector('#vision-status').textContent`), /Simulated Qwen response — no external AI request was made/);
+        assert.match(await evaluate(`document.querySelector('#vision-answer').textContent`), /No visual understanding/);
+        // A newly reviewed fake pending call can be cancelled; nothing is retried.
+        await evaluate(`{
+          const s=document.querySelector('#scenario');s.value='timeout';s.dispatchEvent(new Event('change',{bubbles:true}));
+        }`);
+        await until(`!document.querySelector('#review-screen-send').disabled`);
+        await evaluate(`document.querySelector('#review-screen-send').click()`);
+        await until(`!document.querySelector('#confirm-screen-send').disabled`);
+        await evaluate(`document.querySelector('#confirm-screen-send').click()`);
+        await until(`document.querySelector('#question').disabled`);
+        await evaluate(`document.querySelector('#cancel-vision').click()`);
+        await until(`!document.querySelector('#question').disabled`);
+        assert.equal(screenOperations, 2);assert.equal(await evaluate(`document.querySelector('#vision-answer').hidden`), true);
         assert.equal(externalAttempts, 0); assert.equal(credentialAttempts, 0); assert.equal(captureAttempts, 0); assert.equal(win.isVisible(), false);
         assert.equal(await evaluate(`document.querySelector('#send-remote').disabled`), true);
         // Real discard button -> preload -> owned main handler, no actual capture.
         ipcMain.once('selection:cancel', (e, id) => {
           assert.equal(e.sender, win.webContents); assert.equal(id, payload.sessionId);
-          visualSession.dispose(); finish(true, 'native crop at 100/125/150%; disclosure/disabled remote/exact binding/edit/one-use mock/cancel/discard via sandbox preload; zero external/credential/capture attempts');
+          visualSession.dispose(); finish(true, 'native crop at 100/125/150%; separate screen review/confirmation, shared builder/closed fake, duplicate/cancel/discard; real-send disabled; zero external/credential/capture attempts');
         });
         await evaluate(`document.querySelector('#cancel').click()`);
       } catch (error) { finish(false, error.message); }

@@ -1,5 +1,5 @@
 /** Preview-only offline capability. No provider, pixels or generic IPC access. */
-export const OFFLINE_VISION_SCENARIOS = ['success', 'empty', 'rate-limit', 'timeout'] as const;
+export const OFFLINE_VISION_SCENARIOS = ['success', 'empty', 'rate-limit', 'timeout', 'bad-request', 'unauthorized', 'server-error', 'unknown'] as const;
 export type OfflineVisionScenario = typeof OFFLINE_VISION_SCENARIOS[number];
 /** Disclosure only: neither a live switch nor a request/authorization capability. */
 export const VISION_SHARING = Object.freeze({
@@ -17,6 +17,16 @@ export interface OfflineVisionReview {
   model: typeof VISION_SHARING.model; mime: 'image/png'; width: number; height: number; pngBytes: number;
   expiresAt: number; previewExpiresAt: number;
 }
+/** Distinct rehearsal domain. This policy cannot mint a real transmission permit. */
+export const SCREEN_VISION_POLICY = Object.freeze({ purpose: 'screen-vision-offline-rehearsal',
+  liveAvailable: false, endpointPolicy: 'singapore-workspace-chat-completions',
+  outputTokens: 160, timeoutMs: 20_000, responseBytes: 65_536 } as const);
+export const SCREEN_VISION_SIMULATED_LABEL = 'Simulated Qwen response — no external AI request was made.';
+export interface ScreenVisionReview extends Omit<OfflineVisionReview, 'purpose'> {
+  purpose: typeof SCREEN_VISION_POLICY.purpose; requestId: string;
+  endpointPolicy: typeof SCREEN_VISION_POLICY.endpointPolicy;
+  outputTokens: 160; timeoutMs: 20000; responseBytes: 65536;
+}
 export interface VisionImageEligibility { available: boolean; message: string }
 export const VISION_IMAGE_UNAVAILABLE = 'Vision unavailable for this crop: use an RGB/RGBA PNG, at most 2 MiB, 2048 pixels per side and 2,097,152 pixels, smaller than the display. Preview and Discard remain available. Discard and select a smaller area from the tray. No resizing or transmission occurred.';
 export function validVisionQuestion(value: unknown): value is string {
@@ -26,14 +36,18 @@ export function validVisionQuestion(value: unknown): value is string {
     !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value);
 }
 export type OfflineVisionAction =
-  | { type: 'edit' | 'review'; sessionId: string; question: string; revision: number; scenario: OfflineVisionScenario }
+  | { type: 'edit' | 'review' | 'review-screen-dry-run'; sessionId: string; question: string; revision: number; scenario: OfflineVisionScenario }
   | { type: 'run'; sessionId: string; token: string; revision: number }
+  | { type: 'confirm-screen-dry-run'; sessionId: string; token: string; revision: number }
   | { type: 'cancel'; sessionId: string };
 export interface OfflineVisionNotice {
-  phase: 'editing' | 'review' | 'running' | 'result' | 'error';
+  phase: 'editing' | 'review' | 'running' | 'result' | 'error' | 'screen-review' | 'screen-running' | 'screen-result' | 'screen-error';
   question: string; revision: number; scenario: OfflineVisionScenario;
   imageId: string; message: string; token?: string; expiresAt?: number;
   sharing: typeof VISION_SHARING; imageEligibility: VisionImageEligibility;
   previewExpiresAt: number; review?: Readonly<OfflineVisionReview>;
+  screenReview?: Readonly<ScreenVisionReview>; screenToken?: string;
+  screenAttempt?: { requestId: string; consumed: true; fakeDispatches: 0 | 1 };
+  screenOutcome?: 'completed' | 'failed' | 'unknown' | 'cancelled';
   answer?: string;
 }
