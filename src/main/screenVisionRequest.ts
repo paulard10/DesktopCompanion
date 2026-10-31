@@ -24,6 +24,7 @@ export type ScreenVisionResult = ({ ok: true; kind: 'simulated-qwen-response'; t
 // cannot become a prepared attempt. Weak keys retain no encoded request or crop.
 const prepared = new WeakMap<ScreenVisionWireRequest, {
   fingerprint: string; consumed: boolean; dispatches: 0 | 1; httpStatus: number | null;
+  domain: 'offline-rehearsal' | 'test-only-remote-consent';
   confirmed?: () => boolean;
 }>();
 
@@ -34,6 +35,15 @@ export const screenVisionBridgeAttemptConsumed = (wire: ScreenVisionWireRequest)
 /** Read-only Gate A check for isolated fake-capability issuance; grants no dispatch. */
 export function screenVisionBridgeConsentActive(wire: ScreenVisionWireRequest): boolean {
   return !prepared.get(wire)?.consumed && currentConfirmedRequest(wire, 'before-dispatch') !== null;
+}
+/** Private preparer provenance, not a renderer field or transmission permission. */
+export function screenVisionRemoteTestPrepared(wire: ScreenVisionWireRequest): boolean {
+  const s = prepared.get(wire);
+  if (!s || s.domain !== 'test-only-remote-consent' || s.consumed ||
+      Date.now() >= wire.scope.expiresAt || Date.now() >= wire.scope.previewExpiresAt) return false;
+  try { return wire.fingerprint === s.fingerprint &&
+    createHash('sha256').update(JSON.stringify({ scope: wire.scope, request: wire.request })).digest('hex') === s.fingerprint;
+  } catch { return false; }
 }
 /** Called ONLY after the existing owned session validated/consumed its review token. */
 export function confirmScreenVisionBridgeConsent(wire: ScreenVisionWireRequest, active: () => boolean): boolean {
@@ -78,6 +88,16 @@ export function releaseScreenVisionBridgeLease(lease: ScreenVisionBridgeLease): 
 /** Same builder as the pilot, with a distinct policy/domain, never its permit. */
 export function prepareScreenVisionRequest(crop: ApprovedCrop, scope: Readonly<ScreenVisionReview>, endpoint: string):
   { ok: true; wire: ScreenVisionWireRequest } | { ok: false; code: VisionFailure } {
+  return prepare(crop, scope, endpoint, 'offline-rehearsal');
+}
+/** Dedicated main-only simulation. The review metadata remains offline; no live grant. */
+export function prepareScreenVisionRemoteConsentTest(crop: ApprovedCrop, scope: Readonly<ScreenVisionReview>, endpoint: string):
+  { ok: true; wire: ScreenVisionWireRequest } | { ok: false; code: VisionFailure } {
+  return prepare(crop, scope, endpoint, 'test-only-remote-consent');
+}
+function prepare(crop: ApprovedCrop, scope: Readonly<ScreenVisionReview>, endpoint: string,
+  domain: 'offline-rehearsal' | 'test-only-remote-consent'):
+  { ok: true; wire: ScreenVisionWireRequest } | { ok: false; code: VisionFailure } {
   if (scope.purpose !== SCREEN_VISION_POLICY.purpose || scope.provider !== VISION_SHARING.provider ||
       scope.region !== VISION_SHARING.region || scope.model !== VISION_SHARING.model || scope.mime !== 'image/png' ||
       scope.endpointPolicy !== SCREEN_VISION_POLICY.endpointPolicy || scope.outputTokens !== 160 ||
@@ -88,7 +108,7 @@ export function prepareScreenVisionRequest(crop: ApprovedCrop, scope: Readonly<S
   if (!built.ok) return { ok: false, code: built.code };
   const fingerprint = createHash('sha256').update(JSON.stringify({ scope, request: built.request })).digest('hex');
   const wire = { scope, request: built.request, fingerprint };
-  prepared.set(wire, { fingerprint, consumed: false, dispatches: 0, httpStatus: null });
+  prepared.set(wire, { fingerprint, consumed: false, dispatches: 0, httpStatus: null, domain });
   return { ok: true, wire };
 }
 

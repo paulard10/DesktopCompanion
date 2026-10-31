@@ -3,13 +3,13 @@ import { app } from 'electron';
 import { createOfflineScreenVisionBridge } from './screenVisionBridge.js';
 import { isVisionMock, type OfflineVisionMock } from './qwenVisionMock.js';
 import { isVisionBridgeDummy, type VisionBridgeDummy } from './screenVisionBridgeFake.js';
-import { screenVisionBridgeConsentActive, screenVisionBridgeAttemptConsumed,
+import { screenVisionBridgeConsentActive, screenVisionBridgeAttemptConsumed, screenVisionRemoteTestPrepared,
   type ScreenVisionResult, type ScreenVisionWireRequest } from './screenVisionRequest.js';
 import { exactKeys } from './visionImage.js';
 import { isOfflineVisionAttempt, type OfflineVisionAttempt } from './screenVisionAttempt.js';
 
 // Offline rehearsal purpose is deliberately incompatible with any future native grant.
-export interface OfflineScreenVisionCapability { readonly purpose: 'fake-screen-vision-gate' }
+export interface OfflineScreenVisionCapability { readonly purpose: 'fake-screen-vision-gate' | 'fake-screen-vision-wiring-gate' }
 export const SCREEN_VISION_NATIVE_GATE_CLOSED = true;
 export const FAKE_CAPABILITY_MS = 5_000; // Shorter than, never extending, the existing 30-s consent.
 const issuedRequests = new WeakSet<ScreenVisionWireRequest>();
@@ -20,16 +20,18 @@ type CapabilityState = { consumed: boolean; expired: boolean };
  * Existing confirmed OFFLINE consent rehearses Gate A; it never grants remote consent.
  * Main is trusted: this is not physical-human-click attestation. */
 export function createScreenVisionGateOfflineTest(options: {
-  scope: 'privileged-screen-vision-offline-test'; transport: OfflineVisionMock; dummy: VisionBridgeDummy; attempt?: OfflineVisionAttempt;
+  scope: 'privileged-screen-vision-offline-test' | 'privileged-screen-vision-wiring-test'; transport: OfflineVisionMock; dummy: VisionBridgeDummy; attempt?: OfflineVisionAttempt;
 }) {
   if (app.isPackaged || process.type !== 'browser' || process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0' ||
       !options || !exactKeys(options, Object.hasOwn(options, 'attempt') ? ['scope','transport','dummy','attempt'] : ['scope','transport','dummy']) ||
-      (Object.hasOwn(options, 'attempt') && !isOfflineVisionAttempt(options.attempt)) || options.scope !== 'privileged-screen-vision-offline-test' ||
+      (Object.hasOwn(options, 'attempt') && !isOfflineVisionAttempt(options.attempt)) ||
+      !['privileged-screen-vision-offline-test','privileged-screen-vision-wiring-test'].includes(options.scope) ||
       !isVisionMock(options.transport) || !isVisionBridgeDummy(options.dummy))
     throw new Error('Unpackaged main process and explicit closed fake test scope required.');
   const bridge = createOfflineScreenVisionBridge({ transport: options.transport, dummy: options.dummy,
     ...(options.attempt ? { attempt: options.attempt } : {}) });
   const capabilities = new WeakMap<OfflineScreenVisionCapability, CapabilityState>();
+  const wiringTest = options.scope === 'privileged-screen-vision-wiring-test';
   let pending: { capability: OfflineScreenVisionCapability; wire: ScreenVisionWireRequest; expiresAt: number } | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined, active: AbortController | undefined, disposed = false;
   function clearPending(): void { if (timer) clearTimeout(timer); timer = undefined; pending = undefined; }
@@ -41,8 +43,9 @@ export function createScreenVisionGateOfflineTest(options: {
       if (arguments.length !== 1 || denied()) return fail('authorization', wire);
       if (active || pending) return fail('busy', wire);
       if (!screenVisionBridgeConsentActive(wire)) return fail('authorization', wire);
+      if (wiringTest !== screenVisionRemoteTestPrepared(wire)) return fail('authorization', wire);
       if (issuedRequests.has(wire)) return fail('duplicate', wire);
-      const capability = Object.freeze({ purpose: 'fake-screen-vision-gate' as const,
+      const capability = Object.freeze({ purpose: wiringTest ? 'fake-screen-vision-wiring-gate' as const : 'fake-screen-vision-gate' as const,
         toJSON(): never { throw new Error('Offline capabilities cannot be serialized.'); } });
       const state = { consumed: false, expired: false };
       capabilities.set(capability, state); issuedRequests.add(wire);
