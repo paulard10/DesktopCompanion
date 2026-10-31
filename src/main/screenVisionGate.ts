@@ -6,6 +6,7 @@ import { isVisionBridgeDummy, type VisionBridgeDummy } from './screenVisionBridg
 import { screenVisionBridgeConsentActive, screenVisionBridgeAttemptConsumed,
   type ScreenVisionResult, type ScreenVisionWireRequest } from './screenVisionRequest.js';
 import { exactKeys } from './visionImage.js';
+import { isOfflineVisionAttempt, type OfflineVisionAttempt } from './screenVisionAttempt.js';
 
 // Offline rehearsal purpose is deliberately incompatible with any future native grant.
 export interface OfflineScreenVisionCapability { readonly purpose: 'fake-screen-vision-gate' }
@@ -19,13 +20,15 @@ type CapabilityState = { consumed: boolean; expired: boolean };
  * Existing confirmed OFFLINE consent rehearses Gate A; it never grants remote consent.
  * Main is trusted: this is not physical-human-click attestation. */
 export function createScreenVisionGateOfflineTest(options: {
-  scope: 'privileged-screen-vision-offline-test'; transport: OfflineVisionMock; dummy: VisionBridgeDummy;
+  scope: 'privileged-screen-vision-offline-test'; transport: OfflineVisionMock; dummy: VisionBridgeDummy; attempt?: OfflineVisionAttempt;
 }) {
   if (app.isPackaged || process.type !== 'browser' || process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0' ||
-      !options || !exactKeys(options, ['scope','transport','dummy']) || options.scope !== 'privileged-screen-vision-offline-test' ||
+      !options || !exactKeys(options, Object.hasOwn(options, 'attempt') ? ['scope','transport','dummy','attempt'] : ['scope','transport','dummy']) ||
+      (Object.hasOwn(options, 'attempt') && !isOfflineVisionAttempt(options.attempt)) || options.scope !== 'privileged-screen-vision-offline-test' ||
       !isVisionMock(options.transport) || !isVisionBridgeDummy(options.dummy))
     throw new Error('Unpackaged main process and explicit closed fake test scope required.');
-  const bridge = createOfflineScreenVisionBridge({ transport: options.transport, dummy: options.dummy });
+  const bridge = createOfflineScreenVisionBridge({ transport: options.transport, dummy: options.dummy,
+    ...(options.attempt ? { attempt: options.attempt } : {}) });
   const capabilities = new WeakMap<OfflineScreenVisionCapability, CapabilityState>();
   let pending: { capability: OfflineScreenVisionCapability; wire: ScreenVisionWireRequest; expiresAt: number } | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined, active: AbortController | undefined, disposed = false;

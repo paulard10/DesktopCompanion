@@ -8,7 +8,8 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const gateProof = process.argv.includes('--offline-gate');
+const attemptProof = process.argv.includes('--offline-attempt');
+const gateProof = attemptProof || process.argv.includes('--offline-gate');
 const bridgeProof = gateProof || process.argv.includes('--offline-bridge'); // Standalone fake proofs only; never app activation flags.
 if (!process.versions.electron) {
   const tempRoot = fs.realpathSync(os.tmpdir());
@@ -16,7 +17,12 @@ if (!process.versions.electron) {
   const env = { COMPANION_SELECTION_PROFILE: directory };
   for (const name of ['SystemRoot','WINDIR','TEMP','TMP','APPDATA','LOCALAPPDATA','USERPROFILE','PATH'])
     if (process.env[name] !== undefined) env[name] = process.env[name];
-  const child = spawn(process.execPath, [path.join(root, 'node_modules/electron/cli.js'), fileURLToPath(import.meta.url), ...(gateProof ? ['--offline-gate'] : bridgeProof ? ['--offline-bridge'] : [])], {
+  // Own Electron directly: killing the Node CLI wrapper can leave its Electron
+  // child alive after a timeout and prevent disposable-profile cleanup.
+  const executable = fs.realpathSync(path.join(root, 'node_modules/electron/dist/electron.exe'));
+  assert.equal(path.dirname(executable), fs.realpathSync(path.join(root, 'node_modules/electron/dist')));
+  assert.match(path.basename(executable), /^electron(?:\.exe)?$/i);
+  const child = spawn(executable, [fileURLToPath(import.meta.url), ...(attemptProof ? ['--offline-attempt'] : gateProof ? ['--offline-gate'] : bridgeProof ? ['--offline-bridge'] : [])], {
     cwd: root, env, stdio: 'inherit', windowsHide: true,
   });
   const deadline = setTimeout(() => { console.error('selection-proof: timeout'); child.kill(); }, 30_000);
@@ -24,12 +30,14 @@ if (!process.versions.electron) {
     clearTimeout(deadline);
     const resolved = fs.realpathSync(directory);
     assert.equal(path.dirname(resolved), tempRoot); assert.ok(path.basename(resolved).startsWith('companion-selection-proof-'));
-    try { fs.rmSync(resolved, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
+    try { fs.rmSync(resolved, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
     catch { console.error('selection-proof: profile cleanup failed'); process.exitCode = 1; }
     if (code !== 0) process.exitCode = code ?? 1;
   });
 } else {
+  console.log('selection-proof: stage=electron-entry');
   const { app, BrowserWindow, ipcMain, nativeImage, desktopCapturer, screen, session, net, safeStorage } = await import('electron');
+  console.log('selection-proof: stage=electron-module-ready');
   const require = createRequire(import.meta.url);
   let externalAttempts = 0, credentialAttempts = 0, captureAttempts = 0;
   const denyNetwork = () => { externalAttempts++; throw new Error('No network in offline proof'); };
@@ -49,18 +57,35 @@ if (!process.versions.electron) {
   const { SELECTION_CSP } = require('../dist/main/screenSelectionWindow.js');
   const { pixelCrop, captureSize } = require('../dist/shared/screenSelection.js');
   const { createOfflineVisionSession } = require('../dist/main/offlineVisionSession.js');
+  console.log('selection-proof: stage=modules-ready');
   let bridgeScenario = 'success', bridgeChecks = 0;
+  let prepareAttempts = async () => {};
   if (bridgeProof) {
     const requestModule = require('../dist/main/screenVisionRequest.js');
     const { createOfflineScreenVisionBridge } = require('../dist/main/screenVisionBridge.js');
     const createGate = gateProof ? require('../dist/main/screenVisionGate.js').createScreenVisionGateOfflineTest : undefined;
+    const attemptModule = attemptProof ? require('../dist/main/screenVisionAttempt.js') : undefined;
+    const attemptContexts = [];
+    if (attemptProof) prepareAttempts = async () => {
+      // Allocate metadata handles before confirmation, not permissions or records.
+      // Avoid introducing a filesystem await between confirmed A and fake B issuance.
+      for (let i = 0; i < 2; i++) {
+        const attemptDirectory = fs.mkdtempSync(path.join(directory, 'companion-vision-attempt-'));
+        attemptContexts.push({ directory: attemptDirectory, handle: await attemptModule.createOfflineVisionAttempt({ directory: attemptDirectory }) });
+      }
+    };
     const { createVisionBridgeDummy, visionBridgeDummyStats } = require('../dist/main/screenVisionBridgeFake.js');
     const { createVisionMock, visionMockStats } = require('../dist/main/qwenVisionMock.js');
     requestModule.executeScreenVisionMock = async (wire, _legacy, signal, attempt) => {
+      if (attemptProof) console.log('selection-proof: stage=attempt-hook');
       const fake = createVisionMock([bridgeScenario === 'timeout' ? { failure: 'pending' } : { status: 200, delayMs: 400,
         body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Offline bridge only. No visual understanding.' }, finish_reason: 'stop' }] }) }]);
+      const attemptContext = attemptProof ? attemptContexts.shift() : undefined;
+      if (attemptProof) assert.ok(attemptContext);
+      const attemptDirectory = attemptContext?.directory, durableAttempt = attemptContext?.handle;
+      if (attemptProof) console.log('selection-proof: stage=attempt-handle-ready');
       const dummy = createVisionBridgeDummy(), bridge = gateProof
-        ? createGate({ scope: 'privileged-screen-vision-offline-test', transport: fake, dummy })
+        ? createGate({ scope: 'privileged-screen-vision-offline-test', transport: fake, dummy, ...(durableAttempt ? { attempt: durableAttempt } : {}) })
         : createOfflineScreenVisionBridge({ transport: fake, dummy });
       try {
         let result;
@@ -68,14 +93,21 @@ if (!process.versions.electron) {
           assert.equal((await bridge.run(wire, undefined, signal)).code, 'authorization');
           assert.equal(visionBridgeDummyStats(dummy).loads, 0); assert.equal(visionMockStats(fake).calls, 0);
           const issued = bridge.issue(wire); assert.equal(issued.ok, true);
+          if (attemptProof) console.log('selection-proof: stage=fake-capability-issued');
           assert.equal(visionBridgeDummyStats(dummy).loads, 0); assert.equal(visionMockStats(fake).calls, 0);
           const pending = bridge.run(wire, issued.capability, signal);
           assert.equal((await bridge.run(wire, issued.capability, signal)).code, 'duplicate');
           result = await pending;
+          if (attemptProof) console.log('selection-proof: stage=attempt-result');
         } else result = await bridge.run(wire, signal);
         assert.ok(visionBridgeDummyStats(dummy).loads <= 1); assert.ok(visionMockStats(fake).calls <= 1);
         if (result.ok) { assert.equal(visionBridgeDummyStats(dummy).loads, 1); assert.equal(visionMockStats(fake).calls, 1); }
         assert.equal(result.evidence.transport, 'closed-fake');
+        if (attemptProof) {
+          const durable = await attemptModule.readOfflineVisionAttempt(attemptDirectory);
+          if (result.ok) assert.equal(durable.state, 'COMPLETED');
+          else assert.ok(['NOT_STARTED','FAILED','UNKNOWN'].includes(durable.state));
+        }
         attempt.fakeDispatches = result.evidence.fakeDispatches ?? 0; bridgeChecks++; return result;
       } finally { bridge.dispose(); }
     };
@@ -83,6 +115,7 @@ if (!process.versions.electron) {
   const directory = process.env.COMPANION_SELECTION_PROFILE;
   assert.ok(directory && path.basename(directory).startsWith('companion-selection-proof-'));
   app.setPath('userData', directory); app.setPath('sessionData', directory); registerAppScheme();
+  console.log('selection-proof: stage=profile-set');
   // Make any accidental real desktop request an immediate test failure.
   desktopCapturer.getSources = () => { captureAttempts++; throw new Error('Real desktop capture forbidden in synthetic proof'); };
   let win, visualSession, finished = false, processCountBeforeWindow = 0;
@@ -94,12 +127,14 @@ if (!process.versions.electron) {
     ipcMain.removeAllListeners('selection:vision');
     visualSession?.dispose(); visualSession = undefined; lastRun = undefined;
     const processCountWithWindow = app.getAppMetrics().length;
+    console.log(`selection-proof: stage=closing-${ok ? 'pass' : 'fail'}`);
     if (win && !win.isDestroyed()) win.destroy();
     console.log(`selection-proof: ${ok ? 'PASS' : 'FAIL'} ${detail}`);
     console.log(`selection-proof: aggregate processes beforeWindow=${processCountBeforeWindow} withHiddenWindow=${processCountWithWindow}; all proof processes exit with the disposable app`);
     if (ok) app.quit(); else app.exit(1);
   }
   void app.whenReady().then(() => {
+    console.log('selection-proof: stage=app-ready');
     registerAppProtocol(path.join(root, 'dist/renderer'));
     session.defaultSession.setPermissionRequestHandler((_wc, _p, cb) => cb(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
@@ -110,14 +145,16 @@ if (!process.versions.electron) {
       cb({ cancel: external });
     });
     processCountBeforeWindow = app.getAppMetrics().length;
-    win = new BrowserWindow({ show: false, width: 640, height: 480,
+    win = new BrowserWindow({ show: false, frame: false, autoHideMenuBar: true, width: 640, height: 480,
       webPreferences: { preload: path.join(root, 'dist/preload/screenSelectionPreload.js'), sandbox: true,
         contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false } });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('preload-error', () => finish(false, 'preload'));
     win.webContents.on('render-process-gone', () => finish(false, 'renderer'));
     ipcMain.once('selection:ready', async (event, viewport) => {
+      console.log('selection-proof: stage=renderer-ready');
       try {
+        await prepareAttempts();
         assert.equal(event.sender, win.webContents);
         const content = win.getContentBounds();
         assert.deepEqual(viewport, { width: content.width, height: content.height,
@@ -214,6 +251,7 @@ if (!process.versions.electron) {
         assert.equal(await evaluate(`document.querySelector('#review-text').textContent`), 'Pregunta editada');
         await evaluate(`document.querySelector('#run-offline').click();document.querySelector('#run-offline').click()`);
         await until(`!document.querySelector('#vision-answer').hidden`);
+        console.log('selection-proof: stage=legacy-result');
         assert.equal(visionOperations, 1);
         assert.match(await evaluate(`document.querySelector('#vision-answer').textContent`), /No visual understanding was performed/);
         assert.match(await evaluate(`document.querySelector('#vision-status').textContent`), /Simulated response — no AI was called/);
@@ -265,7 +303,7 @@ if (!process.versions.electron) {
           assert.equal(e.sender, win.webContents); assert.equal(id, payload.sessionId);
           visualSession.dispose();
           if (bridgeProof) assert.equal(bridgeChecks, 2);
-          finish(true, `native crop at 100/125/150%; separate screen review/confirmation, ${gateProof ? 'independent fake Gate B/shared bridge/dummy credentials' : bridgeProof ? 'shared HTTP bridge/dummy credentials' : 'shared builder/closed fake'}, duplicate/cancel/discard; real-send disabled; zero external/credential/capture attempts`);
+          finish(true, `native crop at 100/125/150%; separate screen review/confirmation, ${attemptProof ? 'OS-flushed offline attempt/independent fake Gate B/shared bridge' : gateProof ? 'independent fake Gate B/shared bridge/dummy credentials' : bridgeProof ? 'shared HTTP bridge/dummy credentials' : 'shared builder/closed fake'}, duplicate/cancel/discard; real-send disabled; zero external/credential/capture attempts`);
         });
         await evaluate(`document.querySelector('#cancel').click()`);
       } catch (error) { finish(false, error.message); }
