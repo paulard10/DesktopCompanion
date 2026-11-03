@@ -8,7 +8,8 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const wiringProof = process.argv.includes('--offline-wiring');
+const oneShotProof = process.argv.includes('--offline-one-shot');
+const wiringProof = oneShotProof || process.argv.includes('--offline-wiring');
 const attemptProof = process.argv.includes('--offline-attempt');
 const gateProof = attemptProof || process.argv.includes('--offline-gate');
 const bridgeProof = wiringProof || gateProof || process.argv.includes('--offline-bridge'); // Standalone fake proofs only; never app activation flags.
@@ -23,7 +24,7 @@ if (!process.versions.electron) {
   const executable = fs.realpathSync(path.join(root, 'node_modules/electron/dist/electron.exe'));
   assert.equal(path.dirname(executable), fs.realpathSync(path.join(root, 'node_modules/electron/dist')));
   assert.match(path.basename(executable), /^electron(?:\.exe)?$/i);
-  const child = spawn(executable, [fileURLToPath(import.meta.url), ...(wiringProof ? ['--offline-wiring'] : attemptProof ? ['--offline-attempt'] : gateProof ? ['--offline-gate'] : bridgeProof ? ['--offline-bridge'] : [])], {
+  const child = spawn(executable, [fileURLToPath(import.meta.url), ...(oneShotProof ? ['--offline-one-shot'] : wiringProof ? ['--offline-wiring'] : attemptProof ? ['--offline-attempt'] : gateProof ? ['--offline-gate'] : bridgeProof ? ['--offline-bridge'] : [])], {
     cwd: root, env, stdio: 'inherit', windowsHide: true,
   });
   const deadline = setTimeout(() => { console.error('selection-proof: timeout'); child.kill(); }, 30_000);
@@ -197,7 +198,8 @@ if (!process.versions.electron) {
         assert.equal(view.blob, true); assert.equal(view.preview, true); assert.equal(view.visionHidden, true);
         assert.match(view.label, /nothing sent to AI/); assert.equal(win.isVisible(), false);
         const payload = { sessionId: 'synthetic-only', displayId: 5, phase: 'PREVIEWING', width: 160, height: 120 };
-        let wiring, wiringFake, wiringDummy;
+        let wiring, wiringFake, wiringDummy, wiringReviewedRequestId;
+        const approveWiring = () => oneShotProof ? wiring.authorizeTestOperation(wiringReviewedRequestId) : wiring.authorizeTestOperation();
         if (wiringProof) {
           const { createVisionMock } = require('../dist/main/qwenVisionMock.js');
           const { createVisionBridgeDummy } = require('../dist/main/screenVisionBridgeFake.js');
@@ -205,13 +207,14 @@ if (!process.versions.electron) {
             body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'No visual understanding. Dedicated wiring test.' }, finish_reason: 'stop' }] }) }, { failure: 'pending' }]);
           wiringDummy = createVisionBridgeDummy();
           wiring = require('../dist/main/screenVisionWiring.js').createPrivilegedVisionWiringOfflineTest({
-            scope: 'privileged-screen-vision-wiring-test', transport: wiringFake, dummy: wiringDummy });
+            scope: oneShotProof ? 'one-shot-screen-vision-wiring-test' : 'privileged-screen-vision-wiring-test', transport: wiringFake, dummy: wiringDummy });
         }
         visualSession = createOfflineVisionSession({ sessionId: payload.sessionId,
           ...(wiring ? { testWiring: wiring } : {}),
           crop: { kind: 'approved-local-crop', mime: 'image/png', bytes: png, ...output,
             x: 30, y: 45, sourceWidth: 240, sourceHeight: 180 },
           publish(vision) {
+            if (vision.phase === 'screen-review') wiringReviewedRequestId = vision.screenReview?.requestId;
             bridgeScenario = vision.scenario;
             if (vision.phase === 'running') visionOperations++;
             if (vision.phase === 'screen-running') screenOperations++;
@@ -301,7 +304,7 @@ if (!process.versions.electron) {
         if (wiringProof) {
           assert.equal(require('../dist/main/qwenVisionMock.js').visionMockStats(wiringFake).calls, 0);
           assert.equal(require('../dist/main/screenVisionBridgeFake.js').visionBridgeDummyStats(wiringDummy).loads, 0);
-          assert.equal(wiring.authorizeTestOperation(), true); // Separate explicit trusted-main test B.
+          assert.equal(approveWiring(), true); // Separate explicit trusted-main test B.
         }
         await evaluate(`document.querySelector('#confirm-screen-send').click();document.querySelector('#confirm-screen-send').click()`);
         await until(`!document.querySelector('#vision-answer').hidden`);
@@ -315,11 +318,16 @@ if (!process.versions.electron) {
         await until(`!document.querySelector('#review-screen-send').disabled`);
         await evaluate(`document.querySelector('#review-screen-send').click()`);
         await until(`!document.querySelector('#confirm-screen-send').disabled`);
-        if (wiringProof) assert.equal(wiring.authorizeTestOperation(), true);
+        if (wiringProof) assert.equal(approveWiring(), !oneShotProof);
         await evaluate(`document.querySelector('#confirm-screen-send').click()`);
-        await until(`document.querySelector('#question').disabled`);
-        await evaluate(`document.querySelector('#cancel-vision').click()`);
-        await until(`!document.querySelector('#question').disabled`);
+        if (oneShotProof) {
+          await until(`!document.querySelector('#question').disabled && document.querySelector('#vision-status').textContent.includes('authorization')`);
+          assert.equal(require('../dist/main/qwenVisionMock.js').visionMockStats(wiringFake).calls, 1);
+        } else {
+          await until(`document.querySelector('#question').disabled`);
+          await evaluate(`document.querySelector('#cancel-vision').click()`);
+          await until(`!document.querySelector('#question').disabled`);
+        }
         assert.equal(screenOperations, 2);assert.equal(await evaluate(`document.querySelector('#vision-answer').hidden`), true);
         // Renderer cancellation is immediate; metadata flush/close can still be
         // settling. Await the actual owned operation, not an editable UI state.
@@ -338,10 +346,10 @@ if (!process.versions.electron) {
           visualSession.dispose();
           if (wiringProof) {
             const calls = require('../dist/main/qwenVisionMock.js').visionMockStats(wiringFake).calls;
-            assert.ok(calls >= 1 && calls <= 2);
+            if (oneShotProof) assert.equal(calls, 1); else assert.ok(calls >= 1 && calls <= 2);
             assert.equal(require('../dist/main/screenVisionBridgeFake.js').visionBridgeDummyStats(wiringDummy).loads, calls);
           } else if (bridgeProof) assert.equal(bridgeChecks, 2);
-          finish(true, `native crop at 100/125/150%; separate screen review/confirmation, ${wiringProof ? 'dedicated TEST A/independent main approval/fake B/explicit shared wiring' : attemptProof ? 'OS-flushed offline attempt/independent fake Gate B/shared bridge' : gateProof ? 'independent fake Gate B/shared bridge/dummy credentials' : bridgeProof ? 'shared HTTP bridge/dummy credentials' : 'shared builder/closed fake'}, duplicate/cancel/discard; real-send disabled; zero external/credential/capture attempts`);
+          finish(true, `native crop at 100/125/150%; separate screen review/confirmation, ${oneShotProof ? 'one-shot TEST activation/exact reviewed ID/one fake invocation/no re-arm' : wiringProof ? 'dedicated TEST A/independent main approval/fake B/explicit shared wiring' : attemptProof ? 'OS-flushed offline attempt/independent fake Gate B/shared bridge' : gateProof ? 'independent fake Gate B/shared bridge/dummy credentials' : bridgeProof ? 'shared HTTP bridge/dummy credentials' : 'shared builder/closed fake'}, duplicate/cancel/discard; real-send disabled; zero external/credential/capture attempts`);
         });
         await evaluate(`document.querySelector('#cancel').click()`);
       } catch (error) { finish(false, error.message); }

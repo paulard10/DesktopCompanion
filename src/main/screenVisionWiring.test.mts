@@ -38,7 +38,8 @@ function setup(t: any, opts: any = {}) {
   t.mock.timers.enable({ apis: ['Date','setTimeout'] });
   const fake = createVisionMock(opts.script ?? [{ status: 200, body: body(), delayMs: 10 }]);
   const dummy = createVisionBridgeDummy(opts.dummy ?? {});
-  const wiring = wiringModule.createPrivilegedVisionWiringOfflineTest({ scope: 'privileged-screen-vision-wiring-test', transport: fake, dummy });
+  const wiring = wiringModule.createPrivilegedVisionWiringOfflineTest({
+    scope: opts.oneShot ? 'one-shot-screen-vision-wiring-test' : 'privileged-screen-vision-wiring-test', transport: fake, dummy });
   let wire: any, revision = 0, question = '', scenario = 'success';
   const prepare = request.prepareScreenVisionRemoteConsentTest;
   t.mock.method(request, 'prepareScreenVisionRemoteConsentTest', (...args: any[]) => { const r = prepare(...args); if (r.ok) wire = r.wire; return r; });
@@ -48,10 +49,11 @@ function setup(t: any, opts: any = {}) {
   const edit = (text = '  ¿Qué muestra esta imagen?  ') => { question = text; send({ type: 'edit', question, revision: ++revision, scenario }); };
   const review = (type = 'review-remote-consent-test') => send({ type, question, revision, scenario });
   const confirm = (token = notices.at(-1)?.screenToken, type = 'confirm-remote-consent-test') => send({ type, token, revision });
-  const begin = () => { edit(); review(); assert.equal(wiring.authorizeTestOperation(), true); confirm(); };
+  const approve = () => opts.oneShot ? wiring.authorizeTestOperation(wire?.scope.requestId) : wiring.authorizeTestOperation();
+  const begin = () => { edit(); review(); assert.equal(approve(), true); confirm(); };
   const tick = async (ms = 10) => { await flush(); t.mock.timers.tick(ms); await flush(); };
   t.after(() => { session.dispose(); wiring.dispose(); });
-  return { wiring, session, crop, fake, dummy, notices, send, edit, review, confirm, begin, tick,
+  return { wiring, session, crop, fake, dummy, notices, send, edit, review, confirm, approve, begin, tick,
     wire: () => wire, calls: () => visionMockStats(fake).calls, loads: () => visionBridgeDummyStats(dummy).loads, last: () => notices.at(-1) };
 }
 
@@ -156,6 +158,59 @@ test('factory rejects forged/reused handles and arbitrary native collaborators',
   assert.throws(() => createOfflineVisionSession({ sessionId: 'reuse', crop: f.crop, publish() {}, testWiring: f.wiring }));
 });
 
+test('one-shot activation requires the exact reviewed ID AND separate test A; IDs alone confer no authority', async t => {
+  const f = setup(t, { oneShot: true }); f.edit(); f.review();
+  assert.equal(f.wiring.authorizeTestOperation(), false);
+  assert.equal(f.wiring.authorizeTestOperation('foreign-review'), false);
+  assert.equal(f.loads(), 0); assert.equal(f.calls(), 0);
+  assert.equal(f.approve(), true); assert.equal(f.approve(), false);
+  assert.equal(f.loads(), 0); assert.equal(f.calls(), 0); f.confirm(); await f.tick();
+  assert.equal(f.calls(), 1); assert.equal(f.loads(), 1); assert.match(f.last().answer, /^Simulated Qwen response/);
+});
+test('one-shot main approval cannot silently target a newer review while approving an old request ID', async t => {
+  const f = setup(t, { oneShot: true }); f.edit(); f.review(); const old = f.wire().scope.requestId;
+  f.edit('A newly reviewed question'); f.review(); assert.notEqual(f.wire().scope.requestId, old);
+  assert.equal(f.wiring.authorizeTestOperation(old), false); assert.equal(f.approve(), true);
+  f.confirm(); await f.tick(); assert.equal(f.calls(), 1);
+});
+test('one-shot activation is not serializable, transferable to another session or acceptable to native HTTPS', async t => {
+  const f = setup(t, { oneShot: true });
+  assert.throws(() => JSON.stringify(f.wiring)); assert.throws(() => structuredClone(f.wiring));
+  assert.throws(() => createOfflineVisionSession({ sessionId: 'other', crop: f.crop, publish() {}, testWiring: { purpose: f.wiring.purpose } }));
+  assert.throws(() => createOfflineVisionSession({ sessionId: 'other', crop: f.crop, publish() {}, testWiring: f.wiring }));
+  const pilot = native.createSyntheticVisionPilot({ settings: () => { throw Error('No actual configuration'); }, vault: { load: () => { throw Error('No actual vault'); } } });
+  assert.equal((await pilot.run(f.wiring)).code, 'disabled'); assert.equal(f.calls(), 0); assert.equal(f.loads(), 0);
+});
+for (const [label, script, dummy] of [
+  ['success', { status: 200, body: body() }, {}],
+  ...[400,401,429,500].map(status => [`HTTP ${status}`, { status, body: '{}' }, {}]),
+  ['timeout', { failure: 'pending' }, {}], ['UNKNOWN', { failure: 'unavailable' }, {}],
+  ['empty', { status: 200, body: '' }, {}], ['malformed', { status: 200, body: '{' }, {}],
+  ['foreign result', { status: 200, body: body(), replyTo: 'other-operation' }, {}],
+  ['missing dummy', { status: 200, body: body() }, { mode: 'missing' }],
+] as any[]) test(`one-shot ${label} consumes the activation; new review cannot automatically renew it`, async t => {
+  const f = setup(t, { oneShot: true, script: [script, { status: 200, body: body() }], dummy });
+  f.begin(); await f.tick(20001); const first = f.last();
+  assert.equal(first.phase, label === 'success' ? 'screen-result' : 'screen-error');
+  if (['timeout','UNKNOWN','foreign result'].includes(label)) assert.equal(first.screenOutcome, 'unknown');
+  const calls = f.calls(); assert.equal(calls, label === 'missing dummy' ? 0 : 1);
+  f.review(); assert.equal(f.approve(), false); f.confirm(); await f.tick(20001);
+  assert.equal(f.calls(), calls); assert.equal(f.loads(), 1); assert.equal(f.last().phase, 'screen-error');
+});
+for (const action of ['cancel','edit','expiry']) test(`one-shot approval revoked by ${action} before confirmation cannot be recycled`, async t => {
+  const f = setup(t, { oneShot: true }); f.edit(); f.review(); assert.equal(f.approve(), true);
+  if (action === 'cancel') f.send({ type: 'cancel' });
+  if (action === 'edit') f.edit('Changed after main approval');
+  if (action === 'expiry') { await f.tick(30000); f.confirm(); }
+  f.review(); assert.equal(f.approve(), false); f.confirm(); await f.tick();
+  assert.equal(f.calls(), 0); assert.equal(f.loads(), 0);
+});
+test('one-shot cancellation after fake entry suppresses output and never re-arms the consumed activation', async t => {
+  const f = setup(t, { oneShot: true, script: [{ failure: 'pending' }] }); f.begin(); await flush(); assert.equal(f.calls(), 1);
+  f.send({ type: 'cancel' }); await f.tick(); f.review(); assert.equal(f.approve(), false); f.confirm(); await f.tick();
+  assert.equal(f.calls(), 1); assert.equal(f.notices.some((n: any) => n.phase === 'screen-result'), false);
+});
+
 const execute = promisify(execFile), worker = path.resolve('scripts/vision-wiring-offline-worker.mjs');
 async function temporary(t: any) {
   const root = await fs.realpath(os.tmpdir()), dir = await fs.mkdtemp(path.join(root, 'companion-vision-attempt-'));
@@ -190,3 +245,16 @@ for (const mode of ['write-denied','write-failure','flush-failure','terminal-fai
     assert.equal(r.resultPhase, 'screen-error'); assert.equal(r.privateAccess, 0); assert.equal(r.network, 0);
     if (mode === 'terminal-failure') assert.equal(r.outcome, 'unknown');
   });
+test('one-shot process exit and missing evidence cannot restore authority; a new explicit operation is independent', async t => {
+  const dir = await temporary(t); assert.equal((await probe('one-shot-after-commit', dir)).exit, 74);
+  await fs.unlink(path.join(dir, 'attempt.jsonl')); // Only this test's known disposable metadata.
+  const recovered = (await probe('one-shot-recover', dir)).result;
+  assert.equal(recovered.calls, 0); assert.equal(recovered.loads, 0); assert.equal(recovered.armed, false);
+  const fresh = (await probe('one-shot-new-session', dir)).result;
+  assert.equal(fresh.calls, 1); assert.equal(fresh.rearmAfterAttempt, false);
+});
+test('one-shot ledger admission denial prevents lookup and cannot renew the privileged activation', async t => {
+  const r = (await probe('one-shot-write-denied', await temporary(t))).result;
+  assert.equal(r.calls, 0); assert.equal(r.loads, 0); assert.equal(r.resultPhase, 'screen-error');
+  assert.equal(r.rearmAfterAttempt, false); assert.equal(r.network, 0); assert.equal(r.privateAccess, 0);
+});
