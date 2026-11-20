@@ -3,6 +3,7 @@ import type { EyePreviewCue } from './faceExpression.js';
 export const IpcChannels = {
   frameReady: 'overlay:frame-ready',
   circleClick: 'overlay:circle-click',
+  selectScreen: 'overlay:select-screen',
   cursorSample: 'overlay:cursor-sample',
   behavior: 'overlay:behavior',
   explore: 'overlay:explore',
@@ -118,6 +119,7 @@ export interface CompanionBridge {
   notifyCircleClick: () => void;
   notifyPhase: (phase: BehaviorPhaseName) => void;
   requestOpenChat: () => void;
+  requestSelectScreen: () => void;
   onCursorSample: (listener: (sample: CursorSample) => void) => () => void;
   onBehavior: (listener: (command: BehaviorCommand) => void) => () => void;
   onExplore: (listener: (durationMs: number | null) => void) => () => void;

@@ -20,6 +20,8 @@ import { isTrailRendererUrl } from '../shared/trustedUrl.js';
 
 export interface TrailController {
   setEnabled: (enabled: boolean) => void;
+  /** Private capture must not let the trail present itself again after it is hidden. */
+  setCaptureHold: (held: boolean) => void;
   reset: () => void;
   showMarker: () => void;
   note: (sample: TrailSample) => void;
@@ -33,6 +35,7 @@ export function createTrailWindow(options: {
   isChatOpen: () => boolean;
 }): TrailController {
   let enabled = false;
+  let captureHold = false;
   let destroyed = false;
   let ready = false;
   let pageFailed = false;
@@ -158,6 +161,15 @@ export function createTrailWindow(options: {
       console.log('desktop-companion: trail enabled');
       pageFailed = false;
       ensureWindow();
+    },
+    setCaptureHold(held: boolean): void {
+      if (destroyed || captureHold === held) {
+        return;
+      }
+      captureHold = held;
+      if (held) {
+        hideWindow();
+      }
     },
     reset(): void {
       if (destroyed) {
@@ -323,7 +335,7 @@ export function createTrailWindow(options: {
 
   function showAt(viewport: DipRect, marker = false): void {
     const created = win;
-    if (!created || created.isDestroyed() || pageFailed || (!marker && options.isChatOpen())) {
+    if (captureHold || !created || created.isDestroyed() || pageFailed || (!marker && options.isChatOpen())) {
       return;
     }
     created.setBackgroundColor('#00000000');

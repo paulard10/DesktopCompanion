@@ -34,7 +34,7 @@ export function createHomeWindow(options: {
   let loadDeadline: ReturnType<typeof setTimeout> | null = null;
   const page = options.dev ? 'http://127.0.0.1:5173/home.html' : 'app://companion/home.html';
 
-  const trusted = (event: IpcMainEvent): boolean => Boolean(options.dev && enabled && win && !win.isDestroyed() &&
+  const trusted = (event: IpcMainEvent): boolean => Boolean(enabled && win && !win.isDestroyed() &&
     !win.webContents.isDestroyed() &&
     event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame &&
     event.senderFrame?.parent === null && isHomeRendererUrl(event.senderFrame.url, options.dev));
@@ -108,7 +108,7 @@ export function createHomeWindow(options: {
     } catch { failClosed(); }
   }
   function ensureWindow(): void {
-    if (disposed || !options.dev || !enabled || !appVisible || win) return;
+    if (disposed || !enabled || !appVisible || win) return;
     try {
       const bounds = placeDockableHome(screen.getPrimaryDisplay().workArea);
       if (!bounds) { failClosed(); return; }
@@ -162,7 +162,7 @@ export function createHomeWindow(options: {
 
   return {
     setEnabled(next) {
-      if (disposed || !options.dev || next === enabled) return;
+      if (disposed || next === enabled) return;
       enabled = next;
       if (next) ensureWindow(); else destroyWindow();
       if (enabled === next) options.onEnabledChanged?.();

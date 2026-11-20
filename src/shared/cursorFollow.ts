@@ -1,10 +1,10 @@
 /** Experimental follow kinematics in desktop DIP and one monotonic clock. */
 export const FOLLOW = {
-  observeJitterDip: 3, directionResponseMs: 150, decisionMs: 200,
+  observeJitterDip: 3, directionResponseMs: 240, decisionMs: 200,
   enterDistanceDip: 220, enterDwellMs: 250, trailingDip: 170,
   minimumExclusionDip: 110, footprintGapDip: 12, roundingGuardDip: 2,
   targetDeadZoneDip: 24, arrivalDip: 8, arrivalSpeed: 5,
-  cruiseSpeed: 130, maxSpeed: 300, acceleration: 320,
+  cruiseSpeed: 118, maxSpeed: 300, acceleration: 250,
   catchupStartDip: 80, catchupFullDip: 480,
   maxStepMs: 64, staleMs: 250, idleMs: 1200, resumeMs: 500,
   captureDwellMs: 300, boutMs: 6000, restMs: 5000, leaseMs: 360000,

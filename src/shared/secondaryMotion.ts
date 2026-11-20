@@ -20,9 +20,10 @@ export const SECONDARY_FRAME_MS = 120;
 export const NOD_MS = 640;
 export const BOUNCE_MS = 780;
 export const CONCERN_MS = 860;
+export const WAVE_MS = 720;
 export const WAKE_PREVIEW_MS = 1_200;
 
-export const SECONDARY_GESTURES = ['none', 'nod', 'bounce', 'concern'] as const;
+export const SECONDARY_GESTURES = ['none', 'nod', 'bounce', 'concern', 'wave'] as const;
 
 export type SecondaryGesture = (typeof SECONDARY_GESTURES)[number];
 
@@ -100,6 +101,9 @@ export function gestureDuration(gesture: SecondaryGesture): number {
   if (gesture === 'concern') {
     return CONCERN_MS;
   }
+  if (gesture === 'wave') {
+    return WAVE_MS;
+  }
   return 0;
 }
 
@@ -145,6 +149,10 @@ export function secondarySampleInto(
     out.leftArmLift = 0.3 * envelope;
     out.rightArmLift = 0.14 * envelope;
     out.antennaSway = -0.16 * envelope;
+  } else if (gesture === 'wave') {
+    out.leftArmLift = 0.32 * envelope;
+    out.rightArmLift = 0.08 * envelope;
+    out.antennaSway = 0.1 * envelope;
   }
   if (wakeAge >= 0 && wakeAge < WAKE_PREVIEW_MS) {
     const slumped = 1 - smooth(wakeAge / WAKE_PREVIEW_MS);
@@ -199,10 +207,18 @@ function hold(out: SecondaryPose, cue: string, now: number): void {
   const breath = slowBreath(now, 4_200, 0.008);
   out.breathingScale = breath;
   out.ambientMix = 1;
+  if (cue === 'IDLE') {
+    const sway = Math.sin(now / 1600) * 0.045;
+    out.leftArmLift = sway;
+    out.rightArmLift = -sway * 0.65;
+    return;
+  }
   if (cue === 'CURIOUS') {
-    out.bodyTilt = 0.07;
-    out.antennaSway = 0.2;
-    out.ambientMix = 0;
+    out.bodyTilt = 0.045;
+    out.antennaSway = 0.08 + Math.sin(now / 1100) * 0.04;
+    out.leftArmLift = 0.05;
+    out.rightArmLift = 0.05;
+    out.ambientMix = 1;
     return;
   }
   if (cue === 'LISTENING') {
@@ -216,6 +232,13 @@ function hold(out: SecondaryPose, cue: string, now: number): void {
     out.bodyTilt = -0.07;
     out.antennaSway = -0.2;
     out.breathingScale = breath * 0.6;
+    out.ambientMix = 0;
+    return;
+  }
+  if (cue === 'SURPRISED') {
+    out.antennaSway = -0.08;
+    out.leftArmLift = 0.12;
+    out.rightArmLift = 0.12;
     out.ambientMix = 0;
     return;
   }

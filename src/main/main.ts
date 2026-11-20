@@ -2,10 +2,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, Menu, screen } from 'electron';
-import { createScreenSelectionController, type ScreenSelectionController } from './screenSelectionWindow.js';
+import { createScreenSelectionController, SELECTION_APP_PAGE, SELECTION_PAGE, type ScreenSelectionController } from './screenSelectionWindow.js';
 import { createChatController, type ChatController } from './chatWindow.js';
-import { checkDisposableCredential } from './safeCredentialStore.js';
-import { registerAppProtocol, registerAppScheme } from './protocol.js';
+import { checkDisposableCredential, createSafeCredentialStore } from './safeCredentialStore.js';
+import { createProviderSettings } from './providerSettings.js';
+import { chatCompletionsUrl } from '../shared/qwenEndpoint.js';
+import { ensureAppProtocol, registerAppProtocol, registerAppScheme } from './protocol.js';
 import { installSecurityPolicy } from './security.js';
 import { createOverlayWindow, preloadPath, rendererRoot, type OverlayController } from './overlayWindow.js';
 import { createTrailWindow, type TrailController } from './trailWindow.js';
@@ -52,6 +54,7 @@ let trail: TrailController | null = null;
 let home: HomeController | null = null;
 let selection: ScreenSelectionController | null = null;
 let selectionHolding = false;
+let selectionAttention = false;
 let tray: { destroy: () => void; refresh: () => void } | null = null;
 let trailOn = false;
 let preferences: UserPreferencesStore | null = null;
@@ -192,7 +195,12 @@ void app.whenReady().then(async () => {
     onDesktopCursor: (sample) => { if (home?.isEnabled()) home.observe(sample); },
     getDockPlatform: () => home?.getDockingBounds() ?? null,
     onDockingStart: () => applyWander(disableWander(wander, overlay?.wanderView()?.travelPhase ?? 'idle')),
-    onDockingChanged: phase => home?.feedback(phase === 'undocked' ? 'idle' : phase === 'docked' ? 'docked' : 'busy'),
+    onDockingChanged: phase => {
+      home?.feedback(phase === 'undocked' ? 'idle' : phase === 'docked' ? 'docked' : 'busy');
+      if (selectionHolding) return;
+      if (phase === 'returning' || phase === 'settling') overlay?.setPresence('ATTENTIVE');
+      if (phase === 'docked') overlay?.setPresence('CLEAR');
+    },
     preloadPath: preloadPath(),
     getTravelBlock: () => {
       if (selectionHolding) return { chatOpen: true, listening: false, speaking: false, generating: false };
@@ -220,6 +228,7 @@ void app.whenReady().then(async () => {
       wander = noteWanderInteraction(wander);
       runWander();
     },
+    onSelectScreen: () => { selection?.start(); },
     onShown: () => runWander(),
     onDisplayChanged: () => runWander(),
     onFirstFrame: () => {
@@ -406,9 +415,26 @@ void app.whenReady().then(async () => {
     trailOn = true;
     trailWindow.setEnabled(true);
   }
+  // Home is the robot's platform. Hide remains a tray action for this session only.
+  if (!smoke) home?.setEnabled(true);
   const loginStartup = createInstalledLoginStartup(dev, smoke);
+  const released = !smoke;
   selection = createScreenSelectionController({
-    enabled: dev && !smoke,
+    enabled: released,
+    page: dev ? SELECTION_PAGE : SELECTION_APP_PAGE,
+    bindAppProtocol: (ses) => ensureAppProtocol(ses.protocol, rendererRoot()),
+    resolveOneShotEndpoint: released ? () => {
+      const current = createProviderSettings(path.join(app.getPath('userData'), 'companion', 'provider-settings.json')).current();
+      return current.provider === 'qwen' && current.endpoint && chatCompletionsUrl(current.endpoint) ? current.endpoint : null;
+    } : undefined,
+    liveSend: released ? async (admission, signal) => {
+      const { executeAdmittedScreenVisionPost } = await import('./qwenVisionTransport.js');
+      const vault = createSafeCredentialStore(path.join(app.getPath('userData'), 'companion', 'qwen-key.bin'));
+      const exchange = await executeAdmittedScreenVisionPost(admission, { vault }, signal);
+      const result = exchange.result;
+      if (result.ok && result.kind !== 'real-provider-response') return { ok: false, code: 'unavailable', posted: exchange.posted };
+      return { ...result, posted: exchange.posted };
+    } : undefined,
     preloadPath: path.join(preloadPath(), '../screenSelectionPreload.js'),
     canStart: () => {
       const activity = chat?.activity(), view = overlay?.wanderView(), phase = overlay?.dockingPhase();
@@ -419,9 +445,19 @@ void app.whenReady().then(async () => {
     onActive: (active) => {
       selectionHolding = active;
       overlay?.setSelectionHold(active);
+      if (active) {
+        selectionAttention = true;
+        overlay?.setPresence('ATTENTIVE');
+      } else if (selectionAttention) {
+        selectionAttention = false;
+        overlay?.setPresence('CLEAR');
+      }
       if (!active && !quitting) runWander();
     },
     conceal: () => {
+      // The trail ages on a 100ms timer and would call showInactive during the
+      // composition wait, failing the all-windows-hidden exclusion check.
+      trail?.setCaptureHold(true);
       const visible = BrowserWindow.getAllWindows().filter(win => !win.isDestroyed() && win.isVisible());
       const restore = (): void => {
         if (quitting) return;
@@ -431,6 +467,7 @@ void app.whenReady().then(async () => {
         } finally {
           overlay?.setCaptureHidden(false);
           overlay?.moveTop();
+          trail?.setCaptureHold(false);
         }
       };
       try {
@@ -444,7 +481,7 @@ void app.whenReady().then(async () => {
     },
   });
   tray = createTray({
-    onSelectScreenArea: dev && !smoke ? () => selection?.start() : undefined,
+    onSelectScreenArea: released ? () => selection?.start() : undefined,
     onShow: () => { selection?.cancel(); overlay?.show(); },
     onHide: () => { selection?.cancel(); overlay?.hide(); },
     onWake: () => {
@@ -480,7 +517,7 @@ void app.whenReady().then(async () => {
     isFollowing: () => overlay?.isFollowing() ?? false,
     onFollow: (enabled) => {
       selection?.cancel();
-      if (!dev || !overlay) return;
+      if (!overlay) return;
       if (enabled) {
         applyWander(disableWander(wander, overlay.wanderView()?.travelPhase ?? 'idle'));
       }

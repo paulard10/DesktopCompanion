@@ -51,7 +51,7 @@ test('the neutral secondary pose is a full reset', () => {
 
 test('secondary channels stay inside their bounds', () => {
   const cues = ['IDLE', 'CURIOUS', 'LISTENING', 'THINKING', 'RESPONDING', 'SPEAKING', 'HAPPY', 'ERROR', 'SLEEPING'];
-  const gestures: SecondaryGesture[] = ['none', 'nod', 'bounce', 'concern'];
+  const gestures: SecondaryGesture[] = ['none', 'nod', 'bounce', 'concern', 'wave'];
   const pose = restSecondary();
   for (const cue of cues) {
     for (const gesture of gestures) {
@@ -68,9 +68,9 @@ test('each cue raises only its own gesture', () => {
   const listening = sample('LISTENING', 'none', -1, 2_000);
   const thinking = sample('THINKING', 'none', -1, 2_000);
   assert.equal(curious.headTilt, 0);
-  assert.ok(curious.bodyTilt > 0.06);
-  assert.ok(curious.antennaSway > 0.15);
-  assert.equal(curious.ambientMix, 0);
+  assert.ok(curious.bodyTilt > 0.03);
+  assert.ok(curious.antennaSway > 0.03);
+  assert.equal(curious.ambientMix, 1);
   assert.equal(curious.bodyBob, 0);
   assert.ok(listening.antennaSway > curious.antennaSway);
   assert.ok(listening.leftArmLift > 0.2);

@@ -13,7 +13,7 @@ export interface UserPreferences {
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   version: USER_PREFERENCES_VERSION,
-  neonTrailEnabled: false,
+  neonTrailEnabled: true,
   startAwake: false,
 };
 
@@ -42,8 +42,8 @@ export function parseUserPreferences(raw: string): PreferenceDocument {
     reason: 'ok',
     preferences: {
       version: USER_PREFERENCES_VERSION,
-      neonTrailEnabled: record.neonTrailEnabled === true,
-      startAwake: record.startAwake === true,
+      neonTrailEnabled: booleanOr(record.neonTrailEnabled, true),
+      startAwake: booleanOr(record.startAwake, false),
     },
   };
 }
@@ -54,6 +54,10 @@ export function serializeUserPreferences(preferences: UserPreferences): string {
     neonTrailEnabled: preferences.neonTrailEnabled === true,
     startAwake: preferences.startAwake === true,
   });
+}
+
+function booleanOr(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 function rejected(reason: PreferenceDocument['reason']): PreferenceDocument {

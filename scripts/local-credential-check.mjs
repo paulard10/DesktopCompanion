@@ -27,7 +27,7 @@ function execute(file,args,env){
  return new Promise((resolve,reject)=>{
   const child=spawn(file,args,{cwd:project,env,shell:false,windowsHide:true,detached:false,stdio:['ignore','pipe','pipe']});
   let out='',invalid=false;
-  const deadline=setTimeout(()=>{invalid=true;if(child.pid)spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore',shell:false});},30000);
+  const deadline=setTimeout(()=>{invalid=true;if(child.pid)spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore',shell:false});},60000);
   child.stdout.on('data',b=>{if(Buffer.byteLength(out)+b.length>8192){invalid=true;child.kill();}else out+=b.toString();});
   child.stderr.on('data',()=>{}); // Never return or persist arbitrary native errors.
   child.once('error',()=>{clearTimeout(deadline);reject(Error('Local diagnostic launch failed'));});

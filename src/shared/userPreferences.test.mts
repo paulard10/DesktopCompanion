@@ -29,7 +29,7 @@ function preferencesFile(directory: string): string {
 }
 
 test('safe defaults reject a missing, corrupt, or unsupported preferences file', () => {
-  assert.deepEqual(DEFAULT_USER_PREFERENCES, { version: 1, neonTrailEnabled: false, startAwake: false });
+  assert.deepEqual(DEFAULT_USER_PREFERENCES, { version: 1, neonTrailEnabled: true, startAwake: false });
   assert.equal(parseUserPreferences('{"version":1,"neonTrailEnabled":false,"startAwake":false}').ok, true);
   const valid = parseUserPreferences('{"version":1,"neonTrailEnabled":true,"startAwake":true,"extra":"ignored"}');
   assert.deepEqual(valid.preferences, { version: 1, neonTrailEnabled: true, startAwake: true });
@@ -63,17 +63,17 @@ test('the preferences file survives a restart and a failed write', () => {
     const first = createUserPreferencesStore(filePath);
     assert.deepEqual(first.current(), DEFAULT_USER_PREFERENCES);
     assert.equal(existsSync(filePath), false);
-    assert.deepEqual(first.update({ neonTrailEnabled: true }), {
+    assert.deepEqual(first.update({ startAwake: true }), {
       version: 1,
       neonTrailEnabled: true,
-      startAwake: false,
+      startAwake: true,
     });
     writeFileSync(decoy, '{"enabled":true,"autoRead":false}');
     writeFileSync(provider, '{"provider":"demo","endpoint":null}');
     writeFileSync(key, Buffer.from('sealed'));
     const restarted = createUserPreferencesStore(filePath);
     assert.equal(restarted.current().neonTrailEnabled, true);
-    assert.equal(restarted.current().startAwake, false);
+    assert.equal(restarted.current().startAwake, true);
     assert.deepEqual(restarted.update({ neonTrailEnabled: false, startAwake: true }), {
       version: 1,
       neonTrailEnabled: false,
@@ -209,7 +209,7 @@ test('preferences stay local and leave the validated product boundaries alone', 
   assert.match(read('src/renderer/avatar/proceduralRobot.ts'), /TorusGeometry\(0\.15, 0\.06/);
   assert.equal(BODY_TILT_MAX, 0.08);
   assert.equal(ARM_LIFT_MAX, 0.36);
-  assert.deepEqual(SECONDARY_GESTURES, ['none', 'nod', 'bounce', 'concern']);
+  assert.deepEqual(SECONDARY_GESTURES, ['none', 'nod', 'bounce', 'concern', 'wave']);
   assert.equal(NUDGE_DIP, 120);
   assert.match(read('src/main/overlayWindow.ts'), /setIgnoreMouseEvents\(true\)/);
   assert.equal(read('src/shared/wander.ts').includes('setInterval'), false);

@@ -81,7 +81,7 @@ function fixture(t: any, homeDev = true, docking = false) {
   }
   for (const name of ['clearInterval', 'clearTimeout'] as const) mock.method(globalThis, name, ((id: number) => timers.delete(id)) as any);
   mock.method(console, 'log', () => {}); mock.method(console, 'error', () => {});
-  let avatar: any, started = 0;
+  let avatar: any, started = 0, selects = 0;
   const home = createHomeWindow({ dev: homeDev, preloadPath: 'C:\\fixture\\homePreload.js', onEnabledChanged: () => changed++,
     ...(docking ? {
       onActivate: () => avatar.requestDocking(home.getDockingBounds()),
@@ -94,7 +94,8 @@ function fixture(t: any, homeDev = true, docking = false) {
     getTravelBlock: () => gates, onVisibilityChanged: (visible: boolean) => home.setAppVisible(visible),
     ...(docking ? { getDockPlatform: () => home.getDockingBounds(), onDockingStart: () => started++,
       onDockingChanged: (phase: string) => home.feedback(phase === 'undocked' ? 'idle' : phase === 'docked' ? 'docked' : 'busy') } : {}),
-    onDesktopCursor: (sample: any) => { if (home.isEnabled()) home.observe(sample); } });
+    onDesktopCursor: (sample: any) => { if (home.isEnabled()) home.observe(sample); },
+    onSelectScreen: () => { selects++; } });
   const avatarWin = windows[0]!;
   const event = (win: FakeWindow) => ({ sender: win.webContents, senderFrame: win.webContents.mainFrame });
   ipc.emit('overlay:frame-ready', event(avatarWin), 'm1.6');
@@ -124,8 +125,33 @@ function fixture(t: any, homeDev = true, docking = false) {
   });
   return { home, avatar, avatarWin, gates, timers, advance, enable, point, click, ready, feedback, event, changed: () => changed,
     phase: (phase: string) => ipc.emit('overlay:phase', event(avatarWin), phase), started: () => started,
+    selects: () => selects,
     sleeps: () => avatarWin.webContents.sent.filter(s => s.channel === 'overlay:behavior' && s.payload === 'sleep').length };
 }
+
+test('awake robot screen control is one owned click and sleep cannot start it', t => {
+  const f = fixture(t);
+  f.phase('SLEEPING');
+  ipc.emit('overlay:select-screen', f.event(f.avatarWin));
+  assert.equal(f.selects(), 0);
+  f.phase('IDLE');
+  ipc.emit('overlay:select-screen', f.event(f.avatarWin));
+  ipc.emit('overlay:select-screen', f.event(f.avatarWin), { image: 'renderer' });
+  ipc.emit('overlay:select-screen', { sender: {}, senderFrame: f.avatarWin.webContents.mainFrame });
+  assert.equal(f.selects(), 1);
+  f.phase('WAKING');
+  ipc.emit('overlay:select-screen', f.event(f.avatarWin));
+  f.phase('TRACKING');
+  ipc.emit('overlay:select-screen', f.event(f.avatarWin));
+  f.phase('RETURNING_TO_SLEEP');
+  ipc.emit('overlay:select-screen', f.event(f.avatarWin));
+  ipc.emit('overlay:circle-click', f.event(f.avatarWin));
+  assert.equal(f.selects(), 3);
+  f.avatar.destroy();
+  ipc.emit('overlay:select-screen', f.event(f.avatarWin));
+  assert.equal(f.selects(), 3);
+  assert.equal(ipc.listenerCount('overlay:select-screen'), 0);
+});
 
 test('Home is OFF at startup, with no extra window, IPC listeners, cursor sampler or watchdog', t => {
   const f = fixture(t); f.advance(2000);
@@ -134,10 +160,12 @@ test('Home is OFF at startup, with no extra window, IPC listeners, cursor sample
   assert.deepEqual([...f.timers.values()].map(t => t.ms), [16]);
 });
 
-test('production Home rejects explicit enable without creating a renderer or listener', t => {
+test('production Home loads the packaged page and never the dev server', t => {
   const f = fixture(t, false); f.home.setEnabled(true); f.advance(1000);
-  assert.equal(f.home.isEnabled(), false); assert.equal(windows.length, 1);
-  assert.equal(ipc.listenerCount('home:ready'), 0);
+  assert.equal(f.home.isEnabled(), true); assert.equal(windows.length, 2);
+  const page = windows[1]!.webContents.mainFrame.url;
+  assert.equal(page, 'app://companion/home.html');
+  assert.equal(page.includes('127.0.0.1'), false);
 });
 
 for (const order of ['page-first', 'paint-first']) test(`one lazy Home window waits for ready + first paint (${order}) without focus`, t => {
@@ -306,32 +334,31 @@ test('Home preload exposes only fixed readiness/click sends and validated feedba
   assert.equal(pulses, 1); stop(); ipcRenderer.emit('home:feedback', {}, 'pulse'); assert.equal(pulses, 1);
 });
 
-test('development-only Home checkbox is default OFF, reflects enable/disable, and is absent from production', () => {
+test('Home checkbox is default OFF in production and reflects enable/disable', () => {
   const common = { onShow() {}, onHide() {}, onWake() {}, onSleep() {}, onOpenChat() {}, onQuit() {},
     onToggleRecoveryCapture() {}, isRecoveryCapture: () => false, isWandering: () => false,
     isTrail: () => false, isStartAwake: () => false, startupAvailable: false, isStartWithWindows: () => false };
-  const production = createTray({ ...common, devMovement: false });
-  assert.equal(FakeTray.last.menu.some((i: any) => i.label === 'Show Home (Experimental)'), false); production.destroy();
   let enabled = false;
-  const dev = createTray({ ...common, devMovement: true, isHome: () => enabled, onHome: (next: boolean) => { enabled = next; } });
-  let item = FakeTray.last.menu.find((i: any) => i.label === 'Show Home (Experimental)');
+  const production = createTray({ ...common, devMovement: false, isHome: () => enabled, onHome: (next: boolean) => { enabled = next; } });
+  let item = FakeTray.last.menu.find((i: any) => i.label === 'Show Home');
   assert.equal(item.checked, false); item.click({ checked: true });
-  item = FakeTray.last.menu.find((i: any) => i.label === 'Show Home (Experimental)'); assert.equal(item.checked, true);
-  item.click({ checked: false }); assert.equal(enabled, false); dev.destroy();
+  item = FakeTray.last.menu.find((i: any) => i.label === 'Show Home'); assert.equal(item.checked, true);
+  item.click({ checked: false }); assert.equal(enabled, false);
+  assert.equal(FakeTray.last.menu.some((i: any) => i.label === 'Test window move'), false);
+  production.destroy();
 });
 
-test('screen selection is a development-only action, never a preference checkbox', () => {
+test('screen selection is a production action, never a preference checkbox', () => {
   let selected = 0;
   const common = { onShow() {}, onHide() {}, onWake() {}, onSleep() {}, onOpenChat() {}, onQuit() {},
     onToggleRecoveryCapture() {}, isRecoveryCapture: () => false, isWandering: () => false,
     isTrail: () => false, isStartAwake: () => false, startupAvailable: false, isStartWithWindows: () => false,
     onSelectScreenArea: () => selected++ };
   const production = createTray({ ...common, devMovement: false });
-  assert.equal(FakeTray.last.menu.some((i: any) => i.label === 'Select Screen Area (Experimental)'), false);
+  const action = FakeTray.last.menu.find((i: any) => i.label === 'Select Screen Area');
+  assert.ok(action); assert.equal(action.type, undefined); action.click(); assert.equal(selected, 1);
+  assert.equal(FakeTray.last.menu.some((i: any) => i.type === 'checkbox' && i.label === 'Select Screen Area'), false);
   production.destroy();
-  const dev = createTray({ ...common, devMovement: true });
-  const action = FakeTray.last.menu.find((i: any) => i.label === 'Select Screen Area (Experimental)');
-  assert.ok(action); assert.equal(action.type, undefined); action.click(); assert.equal(selected, 1); dev.destroy();
 });
 
 test('main wiring keeps Home OFF in smoke, exposes only its narrow activation and has no persisted preference', () => {
@@ -345,6 +372,10 @@ test('main wiring keeps Home OFF in smoke, exposes only its narrow activation an
   assert.doesNotMatch(readFileSync(new URL('../shared/userPreferences.ts', import.meta.url), 'utf8'), /[Hh]ome/);
   const html = readFileSync(new URL('../renderer/home.html', import.meta.url), 'utf8');
   assert.match(html, /connect-src 'none'/); assert.doesNotMatch(html, /<image|<iframe|https:\/\/|data:/);
+  assert.match(html, /id="chassis-shade"[\s\S]*#f5f2ec[\s\S]*#f0ebe3[\s\S]*#e7e2d9/);
+  assert.doesNotMatch(html, /#c5d0cb|#f4f7f5/);
+  assert.match(html, /#7dff9a/);
+  assert.match(html, /id="surface"/);
 });
 
 function dockFixture(t: any) {

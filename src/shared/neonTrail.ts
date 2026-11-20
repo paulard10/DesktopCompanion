@@ -440,7 +440,9 @@ function spawnAlong(
     const side = unit() * 6 - 3;
     const x = nextPoint.x - ux * carry - uy * side;
     const y = nextPoint.y - uy * carry + ux * side;
-    const diameter = TRAIL_MIN_DIAMETER_DIP + unit() * (TRAIL_MAX_DIAMETER_DIP - TRAIL_MIN_DIAMETER_DIP);
+    const span = TRAIL_MAX_DIAMETER_DIP - TRAIL_MIN_DIAMETER_DIP;
+    const rush = distance > 28 ? Math.min(0.45, (distance - 28) / 80) : 0;
+    const diameter = TRAIL_MIN_DIAMETER_DIP + unit() * span * (1 - rush) + span * rush;
     const life = TRAIL_MIN_LIFE_MS + unit() * (TRAIL_MAX_LIFE_MS - TRAIL_MIN_LIFE_MS);
     const magnitude = 2 + unit() * 6;
     const angle = unit() * Math.PI * 2;

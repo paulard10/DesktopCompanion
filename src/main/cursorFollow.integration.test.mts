@@ -128,10 +128,13 @@ test('opt-in uses the one existing 32-ms actuator timer; disable cancels follow 
   assert.equal(f.changed(), 2);
   assert.ok(animationReads <= 1 + 1800 / 200);
 });
-test('production controller rejects enable and never creates follow work', t => {
+test('production follow uses the packaged page and can start without the dev server', t => {
   const f = fixture(t, false);
+  assert.equal(f.win.webContents.mainFrame.url, 'app://companion/index.html');
+  f.win.showInactive();
   f.controller.setFollowEnabled(true); f.advance(2000);
-  assert.equal(f.controller.isFollowing(), false); assert.equal(f.win.moves.length, 0);
+  assert.equal(f.controller.isFollowing(), true);
+  assert.equal(f.win.webContents.mainFrame.url.includes('127.0.0.1'), false);
 });
 test('cursor jumping onto a moving body passes through until the stopped dwell restores its real hit', t => {
   const f = fixture(t);
@@ -201,28 +204,27 @@ test('reduced motion prevents follow and recovery retains whole-window input', t
   f.controller.setRecoveryCapture(true);
   assert.equal(f.win.ignore, false);
 });
-test('development-only tray checkbox reflects runtime state; production omits it', () => {
+test('tray follow checkbox is available in production and reflects runtime state', () => {
   const common = { onShow() {}, onHide() {}, onWake() {}, onSleep() {}, onOpenChat() {},
     onToggleRecoveryCapture() {}, isRecoveryCapture: () => false,
     isWandering: () => false, isTrail: () => false, isStartAwake: () => false,
     startupAvailable: false, isStartWithWindows: () => false, onQuit() {} };
-  const production = createTray({ ...common, devMovement: false });
-  assert.equal(FakeTray.latest.menu.some((item: any) => item.label === 'Follow Cursor (Experimental)'), false);
-  production.destroy();
   let enabled = false;
-  const dev = createTray({ ...common, devMovement: true, isFollowing: () => enabled,
+  const production = createTray({ ...common, devMovement: false, isFollowing: () => enabled,
     onFollow: (next: boolean) => { enabled = next; } });
-  let item = FakeTray.latest.menu.find((entry: any) => entry.label === 'Follow Cursor (Experimental)');
+  let item = FakeTray.latest.menu.find((entry: any) => entry.label === 'Follow Cursor');
   assert.equal(item.checked, false); item.click({ checked: true });
-  item = FakeTray.latest.menu.find((entry: any) => entry.label === 'Follow Cursor (Experimental)');
-  assert.equal(item.checked, true); dev.destroy();
+  item = FakeTray.latest.menu.find((entry: any) => entry.label === 'Follow Cursor');
+  assert.equal(item.checked, true);
+  assert.equal(FakeTray.latest.menu.some((entry: any) => entry.label === 'Test window move'), false);
+  production.destroy();
 });
 test('main explicitly arbitrates wandering versus follow without persisting it or requesting providers', () => {
   const main = readFileSync(path.join(root, 'src/main/main.ts'), 'utf8');
   const start = main.indexOf('onFollow: (enabled)');
   const follow = main.slice(start, main.indexOf('onMoveTest:', start));
   const wander = main.slice(main.indexOf('onWander: (enabled)'), main.indexOf('onTrail: (action)'));
-  assert.match(follow, /!dev/); assert.match(follow, /disableWander/);
+  assert.doesNotMatch(follow, /!dev/); assert.match(follow, /disableWander/);
   assert.match(follow, /overlay\.setFollowEnabled\(enabled\)/);
   assert.match(wander, /overlay\.setFollowEnabled\(false\)/);
   assert.doesNotMatch(follow, /preferenceStore|\.wake\(|fetch\(|qwen|transcribe/);

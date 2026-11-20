@@ -8,7 +8,8 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const oneShotProof = process.argv.includes('--offline-one-shot');
+const remoteConsentProof = process.argv.includes('--remote-consent-dry-run');
+const oneShotProof = remoteConsentProof || process.argv.includes('--offline-one-shot');
 const wiringProof = oneShotProof || process.argv.includes('--offline-wiring');
 const attemptProof = process.argv.includes('--offline-attempt');
 const gateProof = attemptProof || process.argv.includes('--offline-gate');
@@ -24,7 +25,7 @@ if (!process.versions.electron) {
   const executable = fs.realpathSync(path.join(root, 'node_modules/electron/dist/electron.exe'));
   assert.equal(path.dirname(executable), fs.realpathSync(path.join(root, 'node_modules/electron/dist')));
   assert.match(path.basename(executable), /^electron(?:\.exe)?$/i);
-  const child = spawn(executable, [fileURLToPath(import.meta.url), ...(oneShotProof ? ['--offline-one-shot'] : wiringProof ? ['--offline-wiring'] : attemptProof ? ['--offline-attempt'] : gateProof ? ['--offline-gate'] : bridgeProof ? ['--offline-bridge'] : [])], {
+  const child = spawn(executable, [fileURLToPath(import.meta.url), ...(remoteConsentProof ? ['--remote-consent-dry-run'] : oneShotProof ? ['--offline-one-shot'] : wiringProof ? ['--offline-wiring'] : attemptProof ? ['--offline-attempt'] : gateProof ? ['--offline-gate'] : bridgeProof ? ['--offline-bridge'] : [])], {
     cwd: root, env, stdio: 'inherit', windowsHide: true,
   });
   const deadline = setTimeout(() => { console.error('selection-proof: timeout'); child.kill(); }, 30_000);
@@ -125,7 +126,7 @@ if (!process.versions.electron) {
   // Make any accidental real desktop request an immediate test failure.
   desktopCapturer.getSources = () => { captureAttempts++; throw new Error('Real desktop capture forbidden in synthetic proof'); };
   let win, visualSession, finished = false, processCountBeforeWindow = 0;
-  let visionOperations = 0, screenOperations = 0, lastRun;
+  let visionOperations = 0, screenOperations = 0, lastRun, latest;
   const deadline = setTimeout(() => finish(false, 'deadline'), 15_000);
   function finish(ok, detail = '') {
     if (finished) return; finished = true; clearTimeout(deadline);
@@ -196,7 +197,7 @@ if (!process.versions.electron) {
         assert.deepEqual(view.keys, ['cancel', 'confirm', 'onNotice', 'ready', 'select', 'vision']);
         assert.equal(view.width, output.width); assert.equal(view.height, output.height);
         assert.equal(view.blob, true); assert.equal(view.preview, true); assert.equal(view.visionHidden, true);
-        assert.match(view.label, /nothing sent to AI/); assert.equal(win.isVisible(), false);
+        assert.match(view.label, /Ask Qwen about this image/); assert.equal(win.isVisible(), false);
         const payload = { sessionId: 'synthetic-only', displayId: 5, phase: 'PREVIEWING', width: 160, height: 120 };
         let wiring, wiringFake, wiringDummy, wiringReviewedRequestId;
         const approveWiring = () => oneShotProof ? wiring.authorizeTestOperation(wiringReviewedRequestId) : wiring.authorizeTestOperation();
@@ -214,6 +215,7 @@ if (!process.versions.electron) {
           crop: { kind: 'approved-local-crop', mime: 'image/png', bytes: png, ...output,
             x: 30, y: 45, sourceWidth: 240, sourceHeight: 180 },
           publish(vision) {
+            latest = vision;
             if (vision.phase === 'screen-review') wiringReviewedRequestId = vision.screenReview?.requestId;
             bridgeScenario = vision.scenario;
             if (vision.phase === 'running') visionOperations++;
@@ -226,8 +228,8 @@ if (!process.versions.electron) {
               e.senderFrame.parent !== null || e.senderFrame.url !== 'app://companion/screen-selection.html') return;
           if (action.type === 'run') lastRun = action;
           // Standalone synthetic proof ONLY: no production IPC/action union change.
-          const type = wiringProof && action.type === 'review-screen-dry-run' ? 'review-remote-consent-test'
-            : wiringProof && action.type === 'confirm-screen-dry-run' ? 'confirm-remote-consent-test' : action.type;
+          const type = wiringProof && !remoteConsentProof && action.type === 'review-screen-dry-run' ? 'review-remote-consent-test'
+            : wiringProof && !remoteConsentProof && action.type === 'confirm-screen-dry-run' ? 'confirm-remote-consent-test' : action.type;
           visualSession?.dispatch({ ...action, type });
         });
         visualSession.dispatch({ type: 'edit', sessionId: payload.sessionId, question: '', revision: 1, scenario: 'success' });
@@ -241,94 +243,117 @@ if (!process.versions.electron) {
           throw new Error('Synthetic renderer state deadline');
         };
         await until(`!document.querySelector('#vision').hidden`);
-        assert.equal(await evaluate(`document.querySelector('#send-remote').disabled`), true);
-        const disclosure = await evaluate(`document.querySelector('#remote-sharing').textContent`);
-        for (const text of ['Alibaba Cloud Model Studio','Singapore','qwen3.7-plus','Local capture is not permission to upload',
-          'may retain','may incur charges','cannot recall','chat history','screen coordinates']) assert.ok(disclosure.includes(text), text);
-        // A disabled control has no live handler even if devtools-style code enables it.
-        await evaluate(`document.querySelector('#send-remote').disabled=false;document.querySelector('#send-remote').click()`);
-        assert.equal(visionOperations, 0); assert.equal(externalAttempts, 0); assert.equal(credentialAttempts, 0);
-        assert.equal(await evaluate(`document.querySelector('#review-question').disabled`), true);
+        assert.equal(await evaluate(`['#send-remote','#scenario','#run-offline','#review-question','#review-screen-send','#review-remote-send','#confirm-remote-send','#send-once'].every(id => !document.querySelector(id))`), true);
+        assert.equal(await evaluate(`document.querySelector('#ask-qwen').disabled`), true);
+        const disclosure = await evaluate(`document.querySelector('#privacy-brief').textContent + document.querySelector('#privacy-more').textContent`);
+        for (const text of ['Alibaba Cloud Model Studio','Singapore','qwen3.7-plus','may retain','may incur charges','cannot recall','chat history','screen coordinates']) assert.ok(disclosure.includes(text), text);
         await evaluate(`{
           const q=document.querySelector('#question'); q.value='¿Qué significa este error?';
           q.dispatchEvent(new Event('input',{bubbles:true}));
           q.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
         }`);
-        await until(`!document.querySelector('#review-question').disabled`);
-        assert.equal(visionOperations, 0);
-        await evaluate(`document.querySelector('#review-question').click()`);
-        await until(`!document.querySelector('#vision-review').hidden`);
-        assert.equal(await evaluate(`document.querySelector('#review-text').textContent`), '¿Qué significa este error?');
-        assert.equal(await evaluate(`document.querySelector('#remote-sharing').getBoundingClientRect().height > 0 && document.querySelector('#crop').getBoundingClientRect().height >= 1`), true);
-        assert.match(await evaluate(`document.querySelector('#review-image').textContent`), /Same selected PNG: 60 × 30 pixels.*one local simulation only/);
-        assert.equal(await evaluate(`document.querySelector('#send-remote').disabled`), true);
+        await until(`!document.querySelector('#ask-qwen').disabled`);
+        assert.equal(await evaluate(`document.querySelector('#vision-status').textContent.includes('analyzing')`), false);
+        await evaluate(`document.querySelector('#ask-qwen').click();document.querySelector('#ask-qwen').click()`);
+        await until(`document.querySelector('#vision-status').textContent.includes('credential was not read')`);
+        assert.equal(await evaluate(`document.querySelector('#answer-card').hidden && document.querySelector('#crop').src === ${JSON.stringify(previewBlob)}`), true);
+        assert.equal(visionOperations, 0); assert.equal(screenOperations, 0); assert.equal(externalAttempts, 0); assert.equal(credentialAttempts, 0);
+        const waitFor = async predicate => {
+          for (let i = 0; i < 80; i++) { if (predicate(latest)) return latest; await new Promise(resolve => setTimeout(resolve, 25)); }
+          throw new Error(`Synthetic session deadline: ${latest?.phase ?? 'none'}`);
+        };
+        const act = action => {
+          let type = action.type;
+          if (wiringProof && !remoteConsentProof && type === 'review-screen-dry-run') type = 'review-remote-consent-test';
+          if (wiringProof && !remoteConsentProof && type === 'confirm-screen-dry-run') type = 'confirm-remote-consent-test';
+          if (type === 'run') lastRun = { ...action, type, sessionId: payload.sessionId };
+          visualSession.dispatch({ ...action, type, sessionId: payload.sessionId });
+        };
+        let rev = 2;
+        const q1 = '¿Qué significa este error?';
+        await waitFor(v => v.revision === rev && v.question === q1);
+        if (!wiringProof) {
+          act({ type: 'review-remote-dry-run', question: q1, revision: rev, scenario: 'success' });
+          await waitFor(v => v.phase === 'screen-review');
+          assert.equal(latest.screenReview.question, q1);
+          act({ type: 'confirm-remote-dry-run', token: latest.screenToken, revision: rev });
+          await waitFor(v => v.phase === 'screen-error' && v.message.includes('Gate B is not active'));
+          assert.equal(screenOperations, 0); assert.equal(externalAttempts, 0); assert.equal(credentialAttempts, 0);
+        }
+        act({ type: 'review', question: q1, revision: rev, scenario: 'success' });
+        await waitFor(v => v.phase === 'review');
+        assert.equal(latest.review.question, q1);
         assert.equal(await evaluate(`document.querySelector('#crop').src`), previewBlob);
-        assert.equal(visionOperations, 0);
-        await evaluate(`{
-          const q=document.querySelector('#question');q.value='Pregunta editada';q.dispatchEvent(new Event('input',{bubbles:true}));
-        }`);
-        await until(`document.querySelector('#vision-review').hidden`);
-        await evaluate(`document.querySelector('#review-question').click()`);
-        await until(`!document.querySelector('#vision-review').hidden`);
-        assert.equal(await evaluate(`document.querySelector('#review-text').textContent`), 'Pregunta editada');
-        await evaluate(`document.querySelector('#run-offline').click();document.querySelector('#run-offline').click()`);
-        await until(`!document.querySelector('#vision-answer').hidden`);
+        const localToken = latest.token;
+        act({ type: 'run', token: localToken, revision: rev });
+        act({ type: 'run', token: localToken, revision: rev });
+        await waitFor(v => v.phase === 'result');
         console.log('selection-proof: stage=legacy-result');
         assert.equal(visionOperations, 1);
-        assert.match(await evaluate(`document.querySelector('#vision-answer').textContent`), /No visual understanding was performed/);
-        assert.match(await evaluate(`document.querySelector('#vision-status').textContent`), /Simulated response — no AI was called/);
+        assert.match(latest.answer, /No visual understanding was performed/);
+        assert.match(latest.message, /Simulated response — no AI was called/);
+        assert.equal(await evaluate(`document.querySelector('#answer-card').hidden`), true);
         visualSession.dispatch(lastRun); assert.equal(visionOperations, 1);
-        // A pending simulated timeout can be cancelled through the actual preload.
-        await evaluate(`{
-          const s=document.querySelector('#scenario');s.value='timeout';s.dispatchEvent(new Event('change',{bubbles:true}));
-        }`);
-        await until(`!document.querySelector('#review-question').disabled`);
-        await evaluate(`document.querySelector('#review-question').click()`);
-        await until(`!document.querySelector('#vision-review').hidden`);
-        await evaluate(`document.querySelector('#run-offline').click()`);
-        await until(`document.querySelector('#question').disabled`);
-        await evaluate(`document.querySelector('#cancel-vision').click()`);
-        await until(`!document.querySelector('#question').disabled`);
-        assert.equal(await evaluate(`document.querySelector('#vision-answer').hidden`), true);
-        // Separate screen-rehearsal review/confirmation through the unchanged bridge.
-        await evaluate(`{
-          const s=document.querySelector('#scenario');s.value='success';s.dispatchEvent(new Event('change',{bubbles:true}));
-        }`);
-        await until(`!document.querySelector('#review-screen-send').disabled`);
-        await evaluate(`document.querySelector('#review-screen-send').click()`);
-        await until(`!document.querySelector('#confirm-screen-send').hidden && !document.querySelector('#confirm-screen-send').disabled`);
-        assert.equal(await evaluate(`document.querySelector('#review-text').textContent`), 'Pregunta editada');
+        rev++;
+        act({ type: 'edit', question: q1, revision: rev, scenario: 'timeout' });
+        await waitFor(v => v.phase === 'editing' && v.scenario === 'timeout');
+        act({ type: 'review', question: q1, revision: rev, scenario: 'timeout' });
+        await waitFor(v => v.phase === 'review');
+        act({ type: 'run', token: latest.token, revision: rev });
+        await waitFor(v => v.phase === 'running');
+        act({ type: 'cancel' });
+        await waitFor(v => v.phase === 'editing');
+        assert.equal(await evaluate(`document.querySelector('#answer-card').hidden`), true);
+        rev++;
+        act({ type: 'edit', question: 'Pregunta editada', revision: rev, scenario: 'success' });
+        await waitFor(v => v.question === 'Pregunta editada' && v.phase === 'editing');
+        const reviewType = remoteConsentProof ? 'review-remote-dry-run' : 'review-screen-dry-run';
+        const confirmType = remoteConsentProof ? 'confirm-remote-dry-run' : 'confirm-screen-dry-run';
+        act({ type: reviewType, question: 'Pregunta editada', revision: rev, scenario: 'success' });
+        await waitFor(v => v.phase === 'screen-review');
+        assert.equal(latest.screenReview.question, 'Pregunta editada');
         assert.equal(await evaluate(`document.querySelector('#crop').src`), previewBlob);
-        assert.equal(await evaluate(`document.querySelector('#run-offline').hidden && document.querySelector('#send-remote').disabled`), true);
+        if (remoteConsentProof) {
+          assert.match(latest.message, /DRY RUN/);
+          for (const text of ['30 days','legal or security','not been checked','international deployment scope','charges']) assert.ok(disclosure.includes(text), text);
+          rev++;
+          act({ type: 'edit', question: 'Exact dry-run question', revision: rev, scenario: 'success' });
+          await waitFor(v => v.phase === 'editing');
+          act({ type: reviewType, question: 'Exact dry-run question', revision: rev, scenario: 'success' });
+          await waitFor(v => v.phase === 'screen-review' && v.screenReview.question === 'Exact dry-run question');
+          assert.equal(await evaluate(`document.querySelector('#crop').src`), previewBlob);
+        }
         assert.equal(screenOperations, 0);
         if (wiringProof) {
           assert.equal(require('../dist/main/qwenVisionMock.js').visionMockStats(wiringFake).calls, 0);
           assert.equal(require('../dist/main/screenVisionBridgeFake.js').visionBridgeDummyStats(wiringDummy).loads, 0);
-          assert.equal(approveWiring(), true); // Separate explicit trusted-main test B.
+          assert.equal(approveWiring(), true);
         }
-        await evaluate(`document.querySelector('#confirm-screen-send').click();document.querySelector('#confirm-screen-send').click()`);
-        await until(`!document.querySelector('#vision-answer').hidden`);
+        const screenToken = latest.screenToken;
+        act({ type: confirmType, token: screenToken, revision: rev });
+        act({ type: confirmType, token: screenToken, revision: rev });
+        await waitFor(v => v.phase === 'screen-result');
         assert.equal(screenOperations, 1);
-        assert.match(await evaluate(`document.querySelector('#vision-status').textContent`), /Simulated Qwen response — no external AI request was made/);
-        assert.match(await evaluate(`document.querySelector('#vision-answer').textContent`), /No visual understanding/);
-        // A newly reviewed fake pending call can be cancelled; nothing is retried.
-        await evaluate(`{
-          const s=document.querySelector('#scenario');s.value='timeout';s.dispatchEvent(new Event('change',{bubbles:true}));
-        }`);
-        await until(`!document.querySelector('#review-screen-send').disabled`);
-        await evaluate(`document.querySelector('#review-screen-send').click()`);
-        await until(`!document.querySelector('#confirm-screen-send').disabled`);
+        assert.match(latest.message, /Simulated Qwen response — no external AI request was made/);
+        assert.match(latest.answer, /No visual understanding/);
+        assert.equal(await evaluate(`document.querySelector('#answer-card').hidden && document.querySelector('#vision-answer').textContent === ''`), true);
+        const rehearsed = latest.question;
+        rev++;
+        act({ type: 'edit', question: rehearsed, revision: rev, scenario: 'timeout' });
+        await waitFor(v => v.scenario === 'timeout' && v.phase === 'editing');
+        act({ type: reviewType, question: rehearsed, revision: rev, scenario: 'timeout' });
+        await waitFor(v => v.phase === 'screen-review');
         if (wiringProof) assert.equal(approveWiring(), !oneShotProof);
-        await evaluate(`document.querySelector('#confirm-screen-send').click()`);
+        act({ type: confirmType, token: latest.screenToken, revision: rev });
         if (oneShotProof) {
-          await until(`!document.querySelector('#question').disabled && document.querySelector('#vision-status').textContent.includes('authorization')`);
+          await waitFor(v => v.phase !== 'screen-running' && /authorization/.test(v.message));
           assert.equal(require('../dist/main/qwenVisionMock.js').visionMockStats(wiringFake).calls, 1);
         } else {
-          await until(`document.querySelector('#question').disabled`);
-          await evaluate(`document.querySelector('#cancel-vision').click()`);
-          await until(`!document.querySelector('#question').disabled`);
+          await waitFor(v => v.phase === 'screen-running');
+          act({ type: 'cancel' });
+          await waitFor(v => v.phase === 'editing');
         }
-        assert.equal(screenOperations, 2);assert.equal(await evaluate(`document.querySelector('#vision-answer').hidden`), true);
+        assert.equal(screenOperations, 2); assert.equal(await evaluate(`document.querySelector('#answer-card').hidden`), true);
         // Renderer cancellation is immediate; metadata flush/close can still be
         // settling. Await the actual owned operation, not an editable UI state.
         // The existing 30-s supervisor remains the overall bound.
@@ -339,7 +364,7 @@ if (!process.versions.electron) {
           console.log('selection-proof: stage=bridge-drain-complete');
         }
         assert.equal(externalAttempts, 0); assert.equal(credentialAttempts, 0); assert.equal(captureAttempts, 0); assert.equal(win.isVisible(), false);
-        assert.equal(await evaluate(`document.querySelector('#send-remote').disabled`), true);
+        assert.equal(await evaluate(`document.querySelector('#ask-qwen').disabled`), false);
         // Real discard button -> preload -> owned main handler, no actual capture.
         ipcMain.once('selection:cancel', (e, id) => {
           assert.equal(e.sender, win.webContents); assert.equal(id, payload.sessionId);
@@ -349,7 +374,7 @@ if (!process.versions.electron) {
             if (oneShotProof) assert.equal(calls, 1); else assert.ok(calls >= 1 && calls <= 2);
             assert.equal(require('../dist/main/screenVisionBridgeFake.js').visionBridgeDummyStats(wiringDummy).loads, calls);
           } else if (bridgeProof) assert.equal(bridgeChecks, 2);
-          finish(true, `native crop at 100/125/150%; separate screen review/confirmation, ${oneShotProof ? 'one-shot TEST activation/exact reviewed ID/one fake invocation/no re-arm' : wiringProof ? 'dedicated TEST A/independent main approval/fake B/explicit shared wiring' : attemptProof ? 'OS-flushed offline attempt/independent fake Gate B/shared bridge' : gateProof ? 'independent fake Gate B/shared bridge/dummy credentials' : bridgeProof ? 'shared HTTP bridge/dummy credentials' : 'shared builder/closed fake'}, duplicate/cancel/discard; real-send disabled; zero external/credential/capture attempts`);
+          finish(true, `native crop at 100/125/150%; separate screen review/confirmation, ${remoteConsentProof ? 'remote-consent DRY RUN/exact image and question/notice/edit/independent one-shot TEST B/one fake invocation/no re-arm' : oneShotProof ? 'one-shot TEST activation/exact reviewed ID/one fake invocation/no re-arm' : wiringProof ? 'dedicated TEST A/independent main approval/fake B/explicit shared wiring' : attemptProof ? 'OS-flushed offline attempt/independent fake Gate B/shared bridge' : gateProof ? 'independent fake Gate B/shared bridge/dummy credentials' : bridgeProof ? 'shared HTTP bridge/dummy credentials' : 'shared builder/closed fake'}, duplicate/cancel/discard; real-send disabled; zero external/credential/capture attempts`);
         });
         await evaluate(`document.querySelector('#cancel').click()`);
       } catch (error) { finish(false, error.message); }

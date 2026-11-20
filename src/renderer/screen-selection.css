@@ -14,18 +14,26 @@ body.preview #controls { position: static; flex-shrink: 0; max-width: none; bord
 #preview { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
 #crop { display: block; max-width: 100%; max-height: 100%; object-fit: contain; margin: auto; }
 #preview.actual #crop { max-width: none; max-height: none; margin: 0; }
-#vision { flex: 0 1 auto; min-height: 100px; max-height: 58%; overflow: auto; padding: 12px 16px; border-top: 1px solid #578865; background: #122219; }
-body.preview #preview { min-height: 80px; }
-.local-label { color: #a6ffb4; font-weight: 600; }
-#vision label { display: block; margin: 6px 0; font-size: 13px; }
-textarea, select { font: inherit; color: inherit; background: #0b1710; border: 1px solid #94c7a4; border-radius: 6px; padding: 8px; }
-textarea { display: block; width: 100%; resize: vertical; min-height: 56px; max-height: 130px; }
-#question-count { display: block; text-align: right; font-size: 12px; }
-#review-text, #vision-answer { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid #85ff95; padding: 8px; }
-#vision-review { margin-top: 12px; }
-#remote-sharing { padding: 8px 10px; border: 1px solid #578865; border-radius: 6px; }
-#remote-sharing p { font-size: 12px; }
-#remote-sharing summary { font-size: 12px; cursor: pointer; }
-#remote-identity { font-weight: 600; }
-#vision-availability { color: #d5ebdb; }
+#vision { flex: 0 0 auto; max-height: none; overflow: visible; padding: 12px 16px 16px; border-top: 1px solid #2f5a40; background: #122219; }
+body.preview #preview { min-height: 72px; flex: 1 1 auto; display: flex; align-items: center; justify-content: center; }
+body.preview #controls { padding: 12px 16px 8px; }
+#vision label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+textarea { font: inherit; color: inherit; background: #0b1710; border: 1px solid #6ea884; border-radius: 10px; padding: 10px 12px; }
+textarea { display: block; width: 100%; resize: none; min-height: 72px; max-height: 120px; line-height: 1.4; }
+#question-count { margin: 4px 0 0; text-align: right; font-size: 12px; color: #b7d8c2; }
+#privacy-brief { margin: 10px 0 4px; font-size: 12px; line-height: 1.45; color: #d7efe0; max-width: 62ch; }
+#privacy-more { margin: 0 0 10px; }
+#privacy-more summary { font-size: 12px; color: #9dccb0; cursor: pointer; }
+#privacy-more p { font-size: 12px; line-height: 1.45; color: #c5e4d2; }
+.ask-row { display: flex; align-items: center; gap: 12px; min-height: 40px; }
+#ask-qwen { margin: 0; padding: 9px 16px; border-radius: 999px; background: #1f8a45; border-color: #8ee0a8; font-weight: 650; }
+#pending { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: #d7efe0; }
+.spinner { width: 14px; height: 14px; border: 2px solid #2f5a40; border-top-color: #b6ffc4; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; border-top-color: #b6ffc4; } }
+#answer-card { margin-top: 12px; }
+.answer-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.answer-bar span { font-size: 13px; color: #b7d8c2; }
+#copy-answer { margin: 0; padding: 4px 10px; border-radius: 999px; background: transparent; }
+#vision-answer { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; padding: 10px 12px; border-radius: 10px; background: #0b1710; line-height: 1.45; max-height: 180px; overflow: auto; }
 :focus-visible { outline: 2px solid #a6ffb4; outline-offset: 2px; }

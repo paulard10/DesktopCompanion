@@ -190,9 +190,9 @@ export function stepTravel(
   return { ...next, x: placed.x, y: placed.y, width: placed.width, height: placed.height, pause: null };
 }
 
-export function applyTravelPose<T extends { tiltX: number; antenna: number; hover: number; armRelax: number }>(
+export function applyTravelPose<T extends { tiltX: number; tiltZ?: number; antenna: number; hover: number; armRelax: number; squash?: number }>(
   pose: T,
-  input: { traveling: boolean; alertness: number; presence: string | null; reducedMotion: boolean; now: number },
+  input: { traveling: boolean; alertness: number; presence: string | null; reducedMotion: boolean; now: number; travelAgeMs?: number },
 ): T {
   if (!input.traveling || input.alertness < 0.9 || input.reducedMotion) {
     return pose;
@@ -200,13 +200,17 @@ export function applyTravelPose<T extends { tiltX: number; antenna: number; hove
   if (input.presence === 'SPEAKING' || input.presence === 'ERROR' || input.presence === 'HAPPY') {
     return pose;
   }
+  const age = Number.isFinite(input.travelAgeMs) ? Math.max(0, input.travelAgeMs as number) : 360;
+  const launch = Math.exp(-age / 240);
   const wave = Math.sin(input.now / 220);
   return {
     ...pose,
-    tiltX: pose.tiltX + 0.08,
-    antenna: pose.antenna + wave * 0.05,
-    hover: pose.hover + 0.012,
-    armRelax: Math.min(1, pose.armRelax + 0.18 + Math.abs(wave) * 0.04),
+    tiltX: pose.tiltX + 0.07 + 0.04 * launch,
+    tiltZ: (pose.tiltZ ?? 0) + Math.sin(input.now / 980) * 0.018,
+    antenna: pose.antenna - 0.05 * launch + wave * 0.035,
+    hover: pose.hover + 0.01,
+    armRelax: Math.min(1, pose.armRelax + 0.1 + launch * 0.08),
+    squash: 1 - 0.055 * launch,
   };
 }
 

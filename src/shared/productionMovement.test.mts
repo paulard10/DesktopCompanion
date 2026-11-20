@@ -222,7 +222,7 @@ test('movement does not add a renderer, a network call, or a second WebGL contex
   assert.match(read('src/renderer/avatar/proceduralRobot.ts'), /TorusGeometry\(0\.15, 0\.06/);
   assert.equal(BODY_TILT_MAX, 0.08);
   assert.equal(ARM_LIFT_MAX, 0.36);
-  assert.deepEqual(SECONDARY_GESTURES, ['none', 'nod', 'bounce', 'concern']);
+  assert.deepEqual(SECONDARY_GESTURES, ['none', 'nod', 'bounce', 'concern', 'wave']);
   const wander = read('src/shared/wander.ts');
   assert.equal(wander.includes('neonTrail'), false);
   assert.equal(wander.includes('.wake'), false);

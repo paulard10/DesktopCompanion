@@ -10,6 +10,7 @@ import {
   type PointerMode,
 } from '../shared/clickThrough.js';
 import { chatTriggerVisible, withChatTrigger } from '../shared/chatTrigger.js';
+import { screenAskVisible, withScreenAskTrigger } from '../shared/screenAskTrigger.js';
 import { readGesture } from '../shared/gesturePose.js';
 import { BEHAVIOR_PHASES, IpcChannels, type BehaviorPhaseName } from '../shared/ipc.js';
 import { EYE_PREVIEW_CUES, type EyePreviewCue } from '../shared/faceExpression.js';
@@ -86,6 +87,7 @@ export function createOverlayWindow(options: {
   onRobotPhase?: (phase: BehaviorPhaseName) => void;
   onBodyHover?: (onBody: boolean) => void;
   onBodyClick?: () => void;
+  onSelectScreen?: () => void;
   onShown?: () => void;
   onDisplayChanged?: () => void;
   onDesktopCursor?: (sample: HomeCursorObservation | null) => void;
@@ -230,6 +232,11 @@ export function createOverlayWindow(options: {
     options.onBodyClick?.();
   };
 
+  const onSelectScreen = (event: IpcMainEvent, ...args: unknown[]): void => {
+    if (!isOwnedRobotFrame(event) || args.length !== 0 || !screenAskVisible(robotPhase)) return;
+    options.onSelectScreen?.();
+  };
+
   const onPhase = (event: IpcMainEvent, payload: unknown): void => {
     if (!isOwnedRobotFrame(event) || !isBehaviorPhase(payload)) {
       return;
@@ -256,6 +263,7 @@ export function createOverlayWindow(options: {
 
   ipcMain.on(IpcChannels.frameReady, onFrameReady);
   ipcMain.on(IpcChannels.circleClick, onCircleClick);
+  ipcMain.on(IpcChannels.selectScreen, onSelectScreen);
   ipcMain.on(IpcChannels.phase, onPhase);
 
   screen.on('display-added', reposition);
@@ -431,6 +439,7 @@ export function createOverlayWindow(options: {
       haltTravel('clear');
       ipcMain.removeListener(IpcChannels.frameReady, onFrameReady);
       ipcMain.removeListener(IpcChannels.circleClick, onCircleClick);
+      ipcMain.removeListener(IpcChannels.selectScreen, onSelectScreen);
       ipcMain.removeListener(IpcChannels.phase, onPhase);
       screen.removeListener('display-added', reposition);
       screen.removeListener('display-removed', reposition);
@@ -519,7 +528,7 @@ export function createOverlayWindow(options: {
     if (options.dev) console.log(`desktop-companion: docking cancelled reason=${reason}`);
   }
   function requestDocking(platform: HomeRect): boolean {
-    if (!options.dev || destroyed || win.isDestroyed() || !win.isVisible() || recoveryCapture || dockBlocked()) return false;
+    if (destroyed || win.isDestroyed() || !win.isVisible() || recoveryCapture || dockBlocked()) return false;
     if (dock) {
       if (dock.phase === 'docked') awakenDock('leave');
       return true; // Repeated approach/wake/settle clicks never restart a job.
@@ -784,7 +793,9 @@ export function createOverlayWindow(options: {
     };
     const pointed =
       visible && observation.cursorInsideWindow
-        ? withChatTrigger({ mode: next.mode, reason: next.reason }, local.x, local.y, chatTriggerVisible(robotPhase))
+        ? withScreenAskTrigger(
+            withChatTrigger({ mode: next.mode, reason: next.reason }, local.x, local.y, chatTriggerVisible(robotPhase)),
+            local.x, local.y, screenAskVisible(robotPhase))
         : { mode: next.mode, reason: next.reason };
     const onBody = Boolean(
       visible &&
@@ -902,7 +913,7 @@ export function createOverlayWindow(options: {
 
   function setFollowEnabled(enabled: boolean): void {
     if (enabled) cancelDocking('follow-override');
-    if (destroyed || win.isDestroyed() || !options.dev || enabled === follow.enabled) return;
+    if (destroyed || win.isDestroyed() || enabled === follow.enabled) return;
     const before = follow.phase;
     const live = win.getBounds();
     if (enabled) {

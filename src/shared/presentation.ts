@@ -4,7 +4,7 @@ export const SLEEP_GLOW = 0.18;
 export const SLEEP_NOD = 0.18;
 export const SLEEP_ROLL = 0.08;
 export const SLEEP_ANTENNA_DROOP = 0.42;
-export const BODY_YAW_SHARE = 0.38;
+export const BODY_YAW_SHARE = 0.22;
 export const BODY_PITCH_SHARE = 0.28;
 
 export interface AmbientSample {

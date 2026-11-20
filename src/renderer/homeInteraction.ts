@@ -3,13 +3,21 @@ import type { HomeBridge } from '../shared/ipc.ts';
 
 /** Event-bound presentation only. Main acknowledgment is required for feedback. */
 export function attachHome(elements: {
-  button: HTMLButtonElement; svg: SVGSVGElement; chassis: SVGPathElement; deck: SVGEllipseElement; surface?: SVGEllipseElement;
+  button: HTMLButtonElement; svg: SVGSVGElement; chassis: SVGPathElement; deck: SVGEllipseElement;
+  surface?: SVGEllipseElement; ring?: SVGEllipseElement; halo?: SVGEllipseElement;
 }, bridge: HomeBridge): () => void {
   const { button, svg, chassis, deck } = elements;
   svg.setAttribute('viewBox', `0 0 ${HOME.width} ${HOME.height}`);
   chassis.setAttribute('d', homeOutlinePath());
   for (const name of ['cx', 'cy', 'rx', 'ry'] as const) deck.setAttribute(name, String(HOME.platform[name]));
   for (const name of ['cx', 'cy', 'rx', 'ry'] as const) elements.surface?.setAttribute(name, String(HOME.surface[name]));
+  const ring = HOME.surface;
+  for (const node of [elements.ring, elements.halo]) {
+    node?.setAttribute('cx', String(ring.cx));
+    node?.setAttribute('cy', String(ring.cy));
+    node?.setAttribute('rx', String(ring.rx - 7));
+    node?.setAttribute('ry', String(Math.max(4, ring.ry - 3)));
+  }
   const click = (event: MouseEvent): void => {
     if (event.isTrusted && event.button === 0 && homeHit(event.clientX, event.clientY)) bridge.notifyClick();
   };

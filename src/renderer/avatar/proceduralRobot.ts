@@ -95,10 +95,10 @@ export function createProceduralRobot(): AvatarAdapter {
 
   const leftEye = createEye(leftEyeMaterial, leftCatchMaterial, geometries, 1);
   leftEye.name = 'Left eye';
-  leftEye.position.set(-0.26, 0.08, 0.46);
+  leftEye.position.set(-0.24, 0.08, 0.48);
   const rightEye = createEye(rightEyeMaterial, rightCatchMaterial, geometries, -1);
   rightEye.name = 'Right eye';
-  rightEye.position.set(0.26, 0.08, 0.46);
+  rightEye.position.set(0.24, 0.08, 0.48);
   const leftBaseY = leftEye.position.y;
   const rightBaseY = rightEye.position.y;
   face.add(leftEye, rightEye);
@@ -140,6 +140,8 @@ export function createProceduralRobot(): AvatarAdapter {
   const rightCatchlight = rightEye.children[1];
 
   let pulseStartedAt: number | null = null;
+  let antennaLag = 0.12;
+  let squashLag = 1;
 
   return {
     object: root,
@@ -152,9 +154,12 @@ export function createProceduralRobot(): AvatarAdapter {
       pivot.rotation.y = -pose.bodyYaw;
       pivot.rotation.z = bodyRoll;
       pivot.scale.setScalar(clickPulseScale(pulseStartedAt, nowMs) * pose.wakeScale);
-      body.scale.set(bodyRest.x * breath, bodyRest.y * breath, bodyRest.z * breath);
+      const squashTarget = pose.squash ?? 1;
+      squashLag += (squashTarget - squashLag) * 0.18;
+      const wide = 1 + (1 - squashLag) * 0.55;
+      body.scale.set(bodyRest.x * breath * wide, bodyRest.y * breath * squashLag, bodyRest.z * breath * wide);
       const lookYaw = -(pose.eyeYaw - pose.bodyYaw);
-      const pair = eyesFromPose(pose);
+      const pair = matchedEyeScale(eyesFromPose(pose));
       applyEye(leftEye, pair.left, leftBaseY, lookYaw, pose.eyePitch, pose.blink, pose.glow, leftEyeMaterial, leftCatchMaterial, leftCatchlight);
       applyEye(rightEye, pair.right, rightBaseY, lookYaw, pose.eyePitch, pose.blink, pose.glow, rightEyeMaterial, rightCatchMaterial, rightCatchlight);
       paint(cheekMaterial, CHEEK, pose.glow);
@@ -163,7 +168,9 @@ export function createProceduralRobot(): AvatarAdapter {
       leftCatchMaterial.color.setScalar(pose.glow);
       rightCatchMaterial.color.setScalar(pose.glow);
       tipLight.intensity = 0.16 * pose.glow;
-      antenna.rotation.z = 0.12 + pose.antenna + (motion?.antennaSway ?? 0);
+      const antennaTarget = 0.12 + pose.antenna + (motion?.antennaSway ?? 0);
+      antennaLag += (antennaTarget - antennaLag) * (pose.armRelax > 0.8 ? 0.45 : 0.16);
+      antenna.rotation.z = antennaLag;
       antenna.rotation.x = pose.armRelax * 0.32;
       const relax = pose.armRelax;
       const leftLift = motion?.leftArmLift ?? 0;
@@ -257,6 +264,18 @@ function applyEye(
   if (catchlightMesh) {
     catchlightMesh.visible = highlight > 0.05;
   }
+}
+
+/** Size, lift and glow stay shared. Mirrored tilt can still read as an expression. */
+function matchedEyeScale(pair: EyePair): EyePair {
+  const openness = (pair.left.openness + pair.right.openness) / 2;
+  const curvature = (pair.left.curvature + pair.right.curvature) / 2;
+  const lift = (pair.left.lift + pair.right.lift) / 2;
+  const glow = (pair.left.glow + pair.right.glow) / 2;
+  return {
+    left: { ...pair.left, openness, curvature, lift, glow },
+    right: { ...pair.right, openness, curvature, lift, glow },
+  };
 }
 
 function eyesFromPose(pose: AvatarPose): EyePair {

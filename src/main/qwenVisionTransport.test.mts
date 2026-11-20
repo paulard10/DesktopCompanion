@@ -21,7 +21,7 @@ replace(Module,'_load',function(this:any,id:string,...args:any[]){
   if(/safeCredentialStore|providerSettings|keyVault/.test(id)){privateAccess++;throw Error('No actual credential module');}
   return originalLoad.call(this,id,...args);
 });
-const {createSyntheticVisionPilot,LIVE_TEST_FLAG,LIVE_TEST_LIMITS,LIVE_VISION_DISABLED}=require('../../dist/main/qwenVisionTransport.js');
+const {createSyntheticVisionPilot,executeAdmittedScreenVisionPost,LIVE_TEST_FLAG,LIVE_TEST_LIMITS,LIVE_VISION_DISABLED}=require('../../dist/main/qwenVisionTransport.js');
 const fixtureModule=require('../../dist/main/visionPilotFixture.js');
 const {buildVisionRequest}=require('../../dist/main/qwenVisionAdapter.js');
 const {encodeSyntheticCrop,VISION_LIMITS}=require('../../dist/main/visionImage.js');
@@ -293,10 +293,66 @@ test('no logs include key/image/body, including malicious successful echoes',asy
   }finally{[console.log,console.warn,console.error]=old;}
 });
 test('runtime UI/preload/chat imports never reach transport or pilot entrypoint',()=>{
-  for(const name of ['main.ts','screenSelectionWindow.ts','offlineVisionSession.ts','chatWindow.ts']){
+  for(const name of ['screenSelectionWindow.ts','offlineVisionSession.ts','chatWindow.ts']){
     const text=readFileSync(new URL(name,import.meta.url),'utf8');assert.equal(/qwenVisionTransport|vision-live-preflight/.test(text),false);
   }
+  const main=readFileSync(new URL('main.ts',import.meta.url),'utf8');
+  assert.equal(/createSyntheticVisionPilot|vision-live-preflight/.test(main),false);
+  assert.match(main,/executeAdmittedScreenVisionPost/);
   const script=readFileSync(new URL('../../scripts/vision-live-preflight.mjs',import.meta.url),'utf8');
   assert.match(script,/LIVE TEST BLOCKED/);assert.match(script,/NOT YET GIVEN/);assert.equal(script.includes('createSafeCredentialStore'),false);
   const config=readFileSync(new URL('../../electron-builder.yml',import.meta.url),'utf8');assert.match(config,/dist\/\*\*\/\*/);assert.equal(config.includes('scripts/'),false);
+});
+test('an admitted screen crop posts once with a dummy credential and a fake response is not real',async()=>{
+  const {prepareScreenVisionOneShot,armOneScreenVisionSend,admitOneScreenVisionSend}=require('../../dist/main/screenVisionRequest.js');
+  const {fixture}=await import('./visionFixtures.test-support.mts');
+  const crop={...fixture(),kind:'approved-local-crop'},question='what does this image show?';
+  const scope=Object.freeze({purpose:'remote-transmission-consent',consentKind:'REMOTE_TRANSMISSION_CONSENT',execution:'one-shot-held',maxRequests:1,
+    sessionId:'screen',imageId:'image',requestId:'request-1',question,revision:1,provider:'Alibaba Cloud Model Studio',region:'Singapore',model:'qwen3.7-plus',
+    endpointPolicy:'singapore-workspace-chat-completions',mime:'image/png',width:crop.width,height:crop.height,pngBytes:crop.bytes.byteLength,
+    expiresAt:Date.now()+20_000,previewExpiresAt:Date.now()+60_000,outputTokens:160,timeoutMs:20_000,responseBytes:65536});
+  const prepared=prepareScreenVisionOneShot(crop,scope,endpoint);
+  assert.equal(prepared.ok,true);assert.equal(armOneScreenVisionSend(prepared.wire).ok,true);
+  const admitted=admitOneScreenVisionSend(prepared.wire);assert.equal(admitted.ok,true);
+  let loads=0;const calls:any[]=[];const key='DUMMY-SCREEN-KEY';
+  const fetchImpl=(async(u:any,init:any)=>{calls.push({url:u,init});return response();}) as typeof fetch;
+  const vault={load:async()=>{loads++;return key;}};
+  const forged=await executeAdmittedScreenVisionPost({purpose:'one-screen-vision-post'},{vault,fetchImpl});
+  assert.equal(forged.result.ok,false);assert.equal(forged.posted,0);assert.equal(loads,0);assert.equal(calls.length,0);
+  const sent=await executeAdmittedScreenVisionPost(admitted.admission,{vault,fetchImpl});
+  assert.equal(sent.result.ok,true);assert.equal(sent.result.kind,'offline-http-test-response');assert.equal(sent.posted,1);
+  assert.equal(loads,1);assert.equal(calls.length,1);assert.equal(calls[0].url,url);
+  assert.equal(calls[0].init.headers.Authorization,`Bearer ${key}`);assert.equal(calls[0].init.body.includes(question),true);
+  assert.equal(calls[0].init.body.includes('"model":"qwen3.7-plus"'),true);
+  const replay=await executeAdmittedScreenVisionPost(admitted.admission,{vault,fetchImpl});
+  assert.equal(replay.result.ok,false);assert.equal(replay.posted,0);assert.equal(loads,1);assert.equal(calls.length,1);
+  assert.equal(LIVE_VISION_DISABLED,true);
+});
+test('a packaged production admission posts once without the development flag and a forged ticket posts nothing',async()=>{
+  const {prepareScreenVisionOneShot,armOneScreenVisionSend,admitOneScreenVisionSend}=require('../../dist/main/screenVisionRequest.js');
+  const {fixture}=await import('./visionFixtures.test-support.mts');
+  const crop={...fixture(),kind:'approved-local-crop'},question='what does this image show?';
+  const scope=Object.freeze({purpose:'remote-transmission-consent',consentKind:'REMOTE_TRANSMISSION_CONSENT',execution:'one-shot-held',maxRequests:1,
+    sessionId:'screen',imageId:'image',requestId:'request-packaged',question,revision:1,provider:'Alibaba Cloud Model Studio',region:'Singapore',model:'qwen3.7-plus',
+    endpointPolicy:'singapore-workspace-chat-completions',mime:'image/png',width:crop.width,height:crop.height,pngBytes:crop.bytes.byteLength,
+    expiresAt:Date.now()+20_000,previewExpiresAt:Date.now()+60_000,outputTokens:160,timeoutMs:20_000,responseBytes:65536});
+  const prepared=prepareScreenVisionOneShot(crop,scope,endpoint);
+  assert.equal(prepared.ok,true);assert.equal(armOneScreenVisionSend(prepared.wire).ok,true);
+  const admitted=admitOneScreenVisionSend(prepared.wire);assert.equal(admitted.ok,true);
+  app.isPackaged=true;
+  let loads=0;const calls:any[]=[];const key='DUMMY-SCREEN-KEY';
+  const fetchImpl=(async(u:any,init:any)=>{calls.push({url:u,init});return response();}) as typeof fetch;
+  const vault={load:async()=>{loads++;return key;}};
+  try{
+    const forged=await executeAdmittedScreenVisionPost({purpose:'one-screen-vision-post'},{vault,fetchImpl});
+    assert.equal(forged.result.ok,false);assert.equal(forged.posted,0);assert.equal(loads,0);assert.equal(calls.length,0);
+    const sent=await executeAdmittedScreenVisionPost(admitted.admission,{vault,fetchImpl});
+    assert.equal(sent.result.ok,true);assert.equal(sent.result.kind,'offline-http-test-response');assert.equal(sent.posted,1);
+    assert.equal(loads,1);assert.equal(calls.length,1);assert.equal(calls[0].init.headers.Authorization,`Bearer ${key}`);
+    const replay=await executeAdmittedScreenVisionPost(admitted.admission,{vault,fetchImpl});
+    assert.equal(replay.result.ok,false);assert.equal(replay.posted,0);assert.equal(loads,1);assert.equal(calls.length,1);
+    assert.equal(LIVE_VISION_DISABLED,true);
+    const pilot=createSyntheticVisionPilot({settings(){throw Error('settings');},vault,fetchImpl});
+    assert.equal((await pilot.run({})).ok,false);assert.equal(calls.length,1);assert.equal(loads,1);
+  }finally{app.isPackaged=false;}
 });

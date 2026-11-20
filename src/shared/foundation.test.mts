@@ -119,7 +119,8 @@ test('preload exposes frame, click, cursor, and behavior channels without invoke
   assert.match(source, /contextBridge\.exposeInMainWorld\(\s*'companion'/);
   assert.equal(source.includes('ipcRenderer.invoke'), false);
   assert.equal(source.includes('setIgnoreMouseEvents'), false);
-  assert.equal((source.match(/ipcRenderer\.send\(/g) ?? []).length, 4);
+  assert.equal(source.includes(IpcChannels.selectScreen), true);
+  assert.equal((source.match(/ipcRenderer\.send\(/g) ?? []).length, 5);
   assert.equal(source.includes('exposeInMainWorld(\'electron\''), false);
   assert.equal(source.includes('exposeInMainWorld("ipcRenderer"'), false);
 });

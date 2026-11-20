@@ -7,42 +7,32 @@
   <section id="controls" aria-label="Private screen selection">
     <strong id="heading">Select a screen area</strong>
     <p id="status" role="status">Drag a rectangle. No screenshot is taken until you confirm.</p>
-    <p id="privacy">Confirmation briefly acquires this display in memory, then keeps only your crop. Nothing is saved or sent to AI.</p>
+    <p id="privacy">Confirmation keeps only your crop in memory. It is sent only if you click Ask Qwen.</p>
     <button id="confirm" type="button" disabled>Capture selected area</button>
     <button id="cancel" type="button">Cancel</button>
     <button id="fit" type="button" hidden>Actual pixels / Fit</button>
   </section>
   <main id="preview" hidden aria-label="Local image preview"><img id="crop" alt="User-approved cropped screen area"></main>
-  <section id="vision" hidden aria-label="Offline visual question">
-    <p class="local-label">LOCAL SIMULATION ONLY · No upload · No AI analysis</p>
-    <p id="vision-availability" role="status"></p>
-    <label for="question">Ask about this image</label>
-    <textarea id="question" maxlength="500" rows="2" placeholder="Write your own question" aria-describedby="question-count vision-status"></textarea>
-    <span id="question-count">0 / 500</span>
-    <label for="scenario">Simulated outcome</label>
-    <select id="scenario"><option value="success">Success (no image understanding)</option><option value="empty">Empty response</option><option value="rate-limit">Rate limit</option><option value="timeout">Timeout</option><option value="bad-request">HTTP 400</option><option value="unauthorized">HTTP 401</option><option value="server-error">HTTP 500</option><option value="unknown">Unknown outcome</option></select>
-    <button id="review-question" type="button" disabled>Review question</button>
-    <button id="review-screen-send" type="button" disabled>Review Qwen send (offline)</button>
-    <div id="vision-review" hidden>
-      <strong>Review selected screen area and question</strong>
-      <p>The image above is the exact crop used. Only a local simulation is authorized. Nothing will leave this device.</p>
-      <p id="review-text"></p>
-      <p id="review-image"></p>
-      <aside id="remote-sharing" aria-label="Future remote sharing">
-        <p id="remote-identity"></p>
-        <p id="remote-boundary"></p>
-        <details>
-          <summary>What would a future remote question share?</summary>
-          <p id="remote-shared"></p><p id="remote-excluded"></p><p id="remote-risks"></p>
-        </details>
-        <button id="send-remote" type="button" disabled aria-describedby="remote-boundary">Send to Qwen — unavailable</button>
-      </aside>
-      <button id="run-offline" type="button">Run offline vision test</button>
-      <button id="confirm-screen-send" type="button" hidden disabled>Simulate Qwen send (offline)</button>
+  <section id="vision" hidden aria-label="Ask Qwen about this image">
+    <label for="question">Question</label>
+    <textarea id="question" maxlength="500" rows="3" placeholder="What should Qwen explain?" aria-describedby="question-count privacy-brief vision-status"></textarea>
+    <p id="question-count" hidden>0 / 500</p>
+    <p id="privacy-brief">Only this selected image and your question will be sent to Alibaba Cloud Model Studio (Singapore endpoint). Provider data policies and possible API charges apply.</p>
+    <details id="privacy-more">
+      <summary>What is shared</summary>
+      <p id="remote-model">Alibaba Cloud Model Studio · Singapore endpoint · qwen3.7-plus. One click sends one request. There is no automatic retry.</p>
+      <p id="remote-shared"></p><p id="remote-excluded"></p><p id="remote-risks"></p>
+      <p id="remote-processing"></p><p id="remote-retention"></p>
+    </details>
+    <div class="ask-row">
+      <button id="ask-qwen" type="button" disabled>Ask Qwen</button>
+      <p id="pending" hidden><span class="spinner" aria-hidden="true"></span> Qwen is analyzing your image...</p>
     </div>
-    <button id="cancel-vision" type="button" hidden>Cancel review / test</button>
     <p id="vision-status" role="status" aria-live="polite"></p>
-    <p id="vision-answer" hidden></p>
+    <article id="answer-card" hidden>
+      <div class="answer-bar"><span>Answer</span><button id="copy-answer" type="button">Copy answer</button></div>
+      <p id="vision-answer"></p>
+    </article>
   </section>
   <script type="module" src="./screen-selection.ts"></script>
 </body></html>

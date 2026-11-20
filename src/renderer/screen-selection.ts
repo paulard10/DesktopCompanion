@@ -1,5 +1,5 @@
 import { normalizeSelection, type ScreenSelectionBridge, type SelectionNotice } from '../shared/screenSelection';
-import { validVisionQuestion, VISION_SHARING, type OfflineVisionNotice, type OfflineVisionScenario } from '../shared/offlineVision';
+import { validVisionQuestion, VISION_SHARING, type OfflineVisionNotice } from '../shared/offlineVision';
 
 declare global { interface Window { screenSelection: ScreenSelectionBridge } }
 const surface = document.querySelector<HTMLDivElement>('#surface')!;
@@ -14,100 +14,70 @@ let start: { x: number; y: number } | null = null;
 let objectUrl: string | null = null;
 const vision = document.querySelector<HTMLElement>('#vision')!;
 const question = document.querySelector<HTMLTextAreaElement>('#question')!;
-const scenario = document.querySelector<HTMLSelectElement>('#scenario')!;
-const review = document.querySelector<HTMLButtonElement>('#review-question')!;
-const run = document.querySelector<HTMLButtonElement>('#run-offline')!;
-const cancelVision = document.querySelector<HTMLButtonElement>('#cancel-vision')!;
-const reviewPanel = document.querySelector<HTMLElement>('#vision-review')!;
+const ask = document.querySelector<HTMLButtonElement>('#ask-qwen')!;
+const pending = document.querySelector<HTMLElement>('#pending')!;
 const visionStatus = document.querySelector<HTMLElement>('#vision-status')!;
+const answerCard = document.querySelector<HTMLElement>('#answer-card')!;
 const answer = document.querySelector<HTMLElement>('#vision-answer')!;
-const remoteSend = document.querySelector<HTMLButtonElement>('#send-remote')!;
-const availability = document.querySelector<HTMLElement>('#vision-availability')!;
-const reviewScreen = document.querySelector<HTMLButtonElement>('#review-screen-send')!;
-const confirmScreen = document.querySelector<HTMLButtonElement>('#confirm-screen-send')!;
-// Noninteractive disclosure; there is deliberately no remote click listener/IPC.
-for (const [id, text] of Object.entries({ 'remote-identity': VISION_SHARING.identity, 'remote-boundary': VISION_SHARING.boundary,
-  'remote-shared': VISION_SHARING.shared, 'remote-excluded': VISION_SHARING.excluded, 'remote-risks': VISION_SHARING.risks })) {
+const copyAnswer = document.querySelector<HTMLButtonElement>('#copy-answer')!;
+const questionCount = document.querySelector<HTMLElement>('#question-count')!;
+for (const [id, text] of Object.entries({
+  'remote-shared': VISION_SHARING.shared, 'remote-excluded': VISION_SHARING.excluded, 'remote-risks': VISION_SHARING.risks,
+  'remote-processing': VISION_SHARING.processing, 'remote-retention': VISION_SHARING.retention })) {
   document.querySelector<HTMLElement>(`#${id}`)!.textContent = text;
 }
 let visionState: OfflineVisionNotice | undefined;
 let revision = 1;
+const canAsk = (notice = visionState): boolean => Boolean(notice?.imageEligibility.available && validVisionQuestion(question.value) &&
+  !['running', 'screen-running'].includes(notice?.phase ?? ''));
 const release = (): void => {
   image.removeAttribute('src'); if (objectUrl) URL.revokeObjectURL(objectUrl); objectUrl = null;
   visionState = undefined; question.value = ''; answer.textContent = ''; visionStatus.textContent = '';
-  availability.textContent = ''; remoteSend.disabled = true;
-  reviewScreen.disabled = confirmScreen.disabled = true; confirmScreen.hidden = true;
+  ask.disabled = true; pending.hidden = true; answerCard.hidden = true; questionCount.hidden = true; vision.hidden = true;
   if (state) state = { ...state, image: undefined, vision: undefined };
-  document.querySelector('#review-text')!.textContent = ''; reviewPanel.hidden = true; vision.hidden = true;
-  document.querySelector('#review-image')!.textContent = '';
 };
 function editQuestion(): void {
-  if (!state || state.phase !== 'PREVIEWING' || !visionState) return;
-  revision++; visionState = { ...visionState, phase: 'editing', token: undefined, screenToken: undefined, screenReview: undefined, answer: undefined };
-  reviewPanel.hidden = true; run.disabled = confirmScreen.disabled = true; answer.hidden = true; answer.textContent = '';
-  reviewScreen.disabled = review.disabled = !visionState.imageEligibility.available || !validVisionQuestion(question.value);
-  document.querySelector('#question-count')!.textContent = `${question.value.length} / 500`;
-  window.screenSelection.vision({ type: 'edit', sessionId: state.sessionId, question: question.value,
-    revision, scenario: scenario.value as OfflineVisionScenario });
+  if (!state || state.phase !== 'PREVIEWING' || !visionState || question.disabled) return;
+  revision++;
+  visionState = { ...visionState, phase: 'editing', token: undefined, screenToken: undefined, screenReview: undefined, answer: undefined };
+  answerCard.hidden = true; answer.textContent = ''; pending.hidden = true;
+  ask.disabled = !canAsk();
+  questionCount.hidden = question.value.length < 400;
+  questionCount.textContent = `${question.value.length} / 500`;
+  window.screenSelection.vision({ type: 'edit', sessionId: state.sessionId, question: question.value, revision, scenario: 'success' });
+}
+function askQwen(): void {
+  if (!state || !visionState || ask.disabled || !canAsk()) return;
+  ask.disabled = true; question.disabled = true; pending.hidden = false; answerCard.hidden = true;
+  visionStatus.textContent = 'Qwen is analyzing your image...';
+  window.screenSelection.vision({ type: 'ask-qwen', sessionId: state.sessionId, question: question.value, revision });
 }
 question.addEventListener('input', editQuestion);
-scenario.addEventListener('change', editQuestion);
-review.addEventListener('click', () => {
-  if (!state || !visionState || !visionState.imageEligibility.available || !validVisionQuestion(question.value) || ['running','screen-running'].includes(visionState.phase)) return;
-  review.disabled = true;
-  window.screenSelection.vision({ type: 'review', sessionId: state.sessionId, question: question.value,
-    revision, scenario: scenario.value as OfflineVisionScenario });
+question.addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  if (event.ctrlKey || event.metaKey) { event.preventDefault(); askQwen(); }
 });
-reviewScreen.addEventListener('click', () => {
-  if (!state || !visionState || reviewScreen.disabled || !visionState.imageEligibility.available || !validVisionQuestion(question.value)) return;
-  reviewScreen.disabled = true;
-  window.screenSelection.vision({ type: 'review-screen-dry-run', sessionId: state.sessionId, question: question.value,
-    revision, scenario: scenario.value as OfflineVisionScenario });
-});
-confirmScreen.addEventListener('click', () => {
-  if (!state || confirmScreen.disabled || visionState?.phase !== 'screen-review' || !visionState.screenToken ||
-      visionState.screenReview?.question !== question.value || visionState.revision !== revision || visionState.scenario !== scenario.value) return;
-  confirmScreen.disabled = true;
-  const token = visionState.screenToken; visionState = { ...visionState, screenToken: undefined };
-  window.screenSelection.vision({ type: 'confirm-screen-dry-run', sessionId: state.sessionId, token, revision });
-});
-run.addEventListener('click', () => {
-  if (!state || visionState?.phase !== 'review' || !visionState.token || visionState.question !== question.value ||
-      visionState.revision !== revision || visionState.scenario !== scenario.value || run.disabled) return;
-  run.disabled = true;
-  const token = visionState.token; visionState = { ...visionState, token: undefined };
-  window.screenSelection.vision({ type: 'run', sessionId: state.sessionId, token, revision });
-});
-cancelVision.addEventListener('click', () => {
-  if (!state) return;
-  reviewPanel.hidden = true; run.disabled = confirmScreen.disabled = true;
-  if (visionState) visionState = { ...visionState, token: undefined, screenToken: undefined };
-  window.screenSelection.vision({ type: 'cancel', sessionId: state.sessionId });
+ask.addEventListener('click', askQwen);
+copyAnswer.addEventListener('click', () => {
+  const text = answer.textContent ?? '';
+  if (!text) return;
+  void navigator.clipboard.writeText(text).then(() => { visionStatus.textContent = 'Answer copied.'; },
+    () => { visionStatus.textContent = 'The answer could not be copied.'; });
 });
 function showVision(next: OfflineVisionNotice): void {
   if (!objectUrl || next.revision < revision) return;
   visionState = next; revision = next.revision; vision.hidden = false;
-  // Main echoes the validated draft; never insert image/model text as HTML.
-  question.value = next.question; scenario.value = next.scenario;
-  const running = ['running','screen-running'].includes(next.phase);
-  question.disabled = scenario.disabled = running;
-  reviewScreen.disabled = review.disabled = !next.imageEligibility.available || !validVisionQuestion(next.question) || running;
-  remoteSend.disabled = true;
-  availability.textContent = next.imageEligibility.message;
-  document.querySelector('#question-count')!.textContent = `${next.question.length} / 500`;
-  const reviewing = next.phase === 'review' || next.phase === 'screen-review';
-  const binding = next.phase === 'screen-review' ? next.screenReview : next.review;
-  reviewPanel.hidden = !reviewing;
-  document.querySelector('#review-text')!.textContent = reviewing ? binding?.question ?? '' : '';
-  document.querySelector('#review-image')!.textContent = reviewing && binding
-    ? `Same selected PNG: ${binding.width} × ${binding.height} pixels, ${binding.pngBytes} bytes. Approval: one local simulation only.` : '';
-  run.disabled = next.phase !== 'review' || !next.token;
-  run.hidden = next.phase === 'screen-review';
-  confirmScreen.hidden = next.phase !== 'screen-review';
-  confirmScreen.disabled = next.phase !== 'screen-review' || !next.screenToken;
-  cancelVision.hidden = !['review', 'running', 'screen-review', 'screen-running'].includes(next.phase);
-  visionStatus.textContent = next.message;
-  answer.textContent = next.answer ?? ''; answer.hidden = !next.answer;
+  const running = ['running', 'screen-running'].includes(next.phase);
+  if (document.activeElement !== question) question.value = next.question;
+  question.disabled = running;
+  ask.disabled = !canAsk(next);
+  pending.hidden = !running;
+  questionCount.hidden = question.value.length < 400;
+  questionCount.textContent = `${question.value.length} / 500`;
+  const realAnswer = next.phase === 'screen-result' && next.message === 'Qwen answered.' && Boolean(next.answer);
+  answer.textContent = realAnswer ? next.answer ?? '' : '';
+  answerCard.hidden = !realAnswer;
+  visionStatus.textContent = running ? 'Qwen is analyzing your image...' : (realAnswer ? '' : next.message);
 }
 const local = (event: PointerEvent): { x: number; y: number } => ({ x: Math.max(0, Math.min(innerWidth, event.clientX)), y: Math.max(0, Math.min(innerHeight, event.clientY)) });
 function draw(rect: { x: number; y: number; width: number; height: number }): void {
@@ -147,9 +117,10 @@ window.screenSelection.onNotice(notice => {
     image.src = objectUrl; state = { ...notice, image: undefined };
     surface.hidden = true; preview.hidden = false; confirm.hidden = true;
     document.body.classList.add('preview');
-    document.querySelector('#heading')!.textContent = 'Local preview — nothing sent to AI';
-    status.textContent = `${notice.image.width} × ${notice.image.height} pixels. Close or discard to release this preview.`;
-    cancel.textContent = 'Discard image / Close'; document.querySelector<HTMLButtonElement>('#fit')!.hidden = false;
+    document.querySelector('#heading')!.textContent = 'Ask Qwen about this image';
+    status.textContent = 'Close discards this image from memory.';
+    cancel.textContent = 'Close'; document.querySelector<HTMLButtonElement>('#fit')!.hidden = true;
+    question.focus();
   }
   // No controls without a main-owned preview capability (even on the dev page).
   if (notice.vision) showVision(notice.vision);

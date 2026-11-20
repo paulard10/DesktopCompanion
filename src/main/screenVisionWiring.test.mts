@@ -38,8 +38,10 @@ function setup(t: any, opts: any = {}) {
   t.mock.timers.enable({ apis: ['Date','setTimeout'] });
   const fake = createVisionMock(opts.script ?? [{ status: 200, body: body(), delayMs: 10 }]);
   const dummy = createVisionBridgeDummy(opts.dummy ?? {});
+  const oneShot = (opts.oneShot || opts.remoteDryRun) && !opts.legacyWiring;
   const wiring = wiringModule.createPrivilegedVisionWiringOfflineTest({
-    scope: opts.oneShot ? 'one-shot-screen-vision-wiring-test' : 'privileged-screen-vision-wiring-test', transport: fake, dummy });
+    scope: oneShot ? 'one-shot-screen-vision-wiring-test' : 'privileged-screen-vision-wiring-test', transport: fake, dummy,
+    ...(opts.attempt ? { attempt: opts.attempt } : {}) });
   let wire: any, revision = 0, question = '', scenario = 'success';
   const prepare = request.prepareScreenVisionRemoteConsentTest;
   t.mock.method(request, 'prepareScreenVisionRemoteConsentTest', (...args: any[]) => { const r = prepare(...args); if (r.ok) wire = r.wire; return r; });
@@ -47,9 +49,9 @@ function setup(t: any, opts: any = {}) {
   const session = createOfflineVisionSession({ sessionId: 'wiring-session', crop, publish: (n: any) => notices.push(n), ...(opts.normal ? {} : { testWiring: wiring }) });
   const send = (a: any) => session.dispatch({ sessionId: 'wiring-session', ...a });
   const edit = (text = '  ¿Qué muestra esta imagen?  ') => { question = text; send({ type: 'edit', question, revision: ++revision, scenario }); };
-  const review = (type = 'review-remote-consent-test') => send({ type, question, revision, scenario });
-  const confirm = (token = notices.at(-1)?.screenToken, type = 'confirm-remote-consent-test') => send({ type, token, revision });
-  const approve = () => opts.oneShot ? wiring.authorizeTestOperation(wire?.scope.requestId) : wiring.authorizeTestOperation();
+  const review = (type = opts.remoteDryRun ? 'review-remote-dry-run' : 'review-remote-consent-test') => send({ type, question, revision, scenario });
+  const confirm = (token = notices.at(-1)?.screenToken, type = opts.remoteDryRun ? 'confirm-remote-dry-run' : 'confirm-remote-consent-test') => send({ type, token, revision });
+  const approve = () => oneShot ? wiring.authorizeTestOperation(wire?.scope.requestId) : wiring.authorizeTestOperation();
   const begin = () => { edit(); review(); assert.equal(approve(), true); confirm(); };
   const tick = async (ms = 10) => { await flush(); t.mock.timers.tick(ms); await flush(); };
   t.after(() => { session.dispose(); wiring.dispose(); });
@@ -257,4 +259,84 @@ test('one-shot ledger admission denial prevents lookup and cannot renew the priv
   const r = (await probe('one-shot-write-denied', await temporary(t))).result;
   assert.equal(r.calls, 0); assert.equal(r.loads, 0); assert.equal(r.resultPhase, 'screen-error');
   assert.equal(r.rearmAfterAttempt, false); assert.equal(r.network, 0); assert.equal(r.privateAccess, 0);
+});
+
+test('remote consent contract binds the exact main crop/question with an explicit dry-run-only purpose', async t => {
+  const f = setup(t, { remoteDryRun: true }); const question = '  ¿Qué dice?\nOnly invented content.  ';
+  f.edit(question); f.review(); const n = f.last(), s = n.screenReview;
+  assert.equal(s.purpose, 'remote-transmission-consent'); assert.equal(s.consentKind, 'REMOTE_TRANSMISSION_CONSENT');
+  assert.equal(s.execution, 'dry-run-only'); assert.equal(s.maxRequests, 1); assert.ok(Object.isFrozen(s));
+  assert.equal(s.imageId, n.imageId); assert.equal(s.sessionId, 'wiring-session'); assert.equal(s.question, question);
+  assert.equal(s.pngBytes, f.crop.bytes.byteLength); assert.match(n.message, /DRY RUN/);
+  assert.equal(f.wire().request.body.messages[1].content[0].text, question);
+  assert.equal(f.wire().request.body.messages[1].content[1].image_url.url, `data:image/png;base64,${Buffer.from(f.crop.bytes).toString('base64')}`);
+  assert.equal(f.calls(), 0); assert.equal(f.loads(), 0);
+  assert.equal(request.prepareScreenVisionRequest(f.crop, s, 'https://offline-ux.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1').ok, false);
+  assert.equal((await request.executeScreenVisionMock(f.wire(), f.fake, new AbortController().signal, { fakeDispatches: 0 })).code, 'authorization');
+});
+test('ordinary remote dry-run review/confirmation grants no B and never starts transport or lookup', async t => {
+  const f = setup(t, { remoteDryRun: true, normal: true }); f.edit(); f.review(); const token = f.last().screenToken;
+  assert.equal(f.approve(), false); f.confirm(token); f.confirm(token); await f.tick();
+  assert.equal(f.last().phase, 'screen-error'); assert.match(f.last().message, /confirmation checked and consumed.*Gate B is not active/);
+  assert.equal(f.last().screenToken, undefined); assert.equal(f.calls(), 0); assert.equal(f.loads(), 0);
+});
+test('a renewable legacy TEST wiring handle cannot execute the new one-shot remote contract', async t => {
+  const f = setup(t, { remoteDryRun: true, legacyWiring: true }); f.edit(); f.review();
+  assert.equal(f.approve(), false); f.confirm(); await f.tick();
+  assert.match(f.last().message, /Gate B is not active/); assert.equal(f.calls(), 0); assert.equal(f.loads(), 0);
+});
+test('remote contract requires its intended explicit confirmation, not offline or older TEST consent', async t => {
+  const f = setup(t, { remoteDryRun: true }); f.edit(); f.review(); const token = f.last().screenToken; assert.equal(f.approve(), true);
+  for (const type of ['run','confirm-screen-dry-run','confirm-remote-consent-test']) f.confirm(token, type);
+  await f.tick(); assert.equal(f.calls(), 0); assert.equal(f.loads(), 0);
+  f.confirm(token); await f.tick(); assert.equal(f.calls(), 1);
+});
+test('remote confirmation cannot consume the existing offline-simulation review', async t => {
+  const f = setup(t, { remoteDryRun: true }); f.edit(); f.review('review-screen-dry-run'); const token = f.last().screenToken;
+  f.confirm(token); await f.tick(); assert.equal(f.last().phase, 'screen-review'); assert.equal(f.approve(), false); assert.equal(f.calls(), 0);
+});
+for (const field of ['execution','maxRequests','consentKind']) test(`modified remote ${field} cannot become a grant or acquire a dummy`, async t => {
+  const f = setup(t, { remoteDryRun: true }); f.edit(); f.review(); assert.equal(f.approve(), true);
+  f.wire().scope = { ...f.wire().scope, [field]: field === 'maxRequests' ? 2 : 'live' };
+  f.confirm(); await f.tick(); assert.equal(f.calls(), 0); assert.equal(f.loads(), 0);
+  const r = request.prepareScreenVisionRemoteConsentTest(f.crop, f.wire().scope, 'https://offline-ux.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1');
+  assert.equal(r.ok, false);
+});
+for (const action of ['edit','cancel','expiry','discard']) test(`remote dry-run ${action} revokes the exact review without restoring B`, async t => {
+  const f = setup(t, { remoteDryRun: true }); f.edit(); f.review(); const token = f.last().screenToken; assert.equal(f.approve(), true);
+  if (action === 'edit') f.edit('A different exact draft');
+  if (action === 'cancel') f.send({ type: 'cancel' });
+  if (action === 'expiry') await f.tick(30000);
+  if (action === 'discard') f.session.dispose();
+  f.confirm(token); await f.tick(); assert.equal(f.calls(), 0); assert.equal(f.loads(), 0);
+  f.review(); assert.equal(f.approve(), false);
+});
+for (const [label, script] of [
+  ['200', { status: 200, body: body() }], ...[400,401,429,500].map(status => [String(status), { status, body: '{}' }]),
+  ['timeout', { failure: 'pending' }], ['UNKNOWN', { failure: 'unavailable' }],
+  ['foreign result', { status: 200, body: body(), replyTo: 'another-request' }],
+] as any[]) test(`remote dry-run ${label} has one fake invocation, no replay or automatic reactivation`, async t => {
+  const f = setup(t, { remoteDryRun: true, script: [script, { status: 200, body: body() }] }); f.edit(); f.review();
+  const token = f.last().screenToken; assert.equal(f.approve(), true); f.confirm(token); f.confirm(token); await f.tick(20001);
+  assert.equal(f.last().phase, label === '200' ? 'screen-result' : 'screen-error');
+  if (label === '200') assert.match(f.last().answer, /^Simulated Qwen response/);
+  if (['timeout','UNKNOWN','foreign result'].includes(label)) assert.equal(f.last().screenOutcome, 'unknown');
+  assert.equal(f.calls(), 1); assert.equal(f.loads(), 1); f.confirm(token); f.review(); assert.equal(f.approve(), false);
+  f.confirm(); await f.tick(20001); assert.equal(f.calls(), 1);
+});
+test('remote dry-run late result cannot reopen a discarded preview or transfer authority to a new session', async t => {
+  const f = setup(t, { remoteDryRun: true, script: [{ status: 200, body: body('late'), delayMs: 100 }] }); f.begin();
+  await flush(); assert.equal(f.calls(), 1); f.session.dispose(); const count = f.notices.length; await f.tick(20001);
+  assert.equal(f.notices.length, count); assert.equal(f.notices.some((n: any) => n.phase === 'screen-result'), false);
+  assert.throws(() => createOfflineVisionSession({ sessionId: 'new', crop: f.crop, publish() {}, testWiring: f.wiring }));
+});
+test('remote dry-run required ledger admission failure prevents dummy acquisition and dispatch', async t => {
+  const ledger = require('../../dist/main/screenVisionAttempt.js');
+  const attempt = await ledger.createOfflineVisionAttempt({ directory: await temporary(t) });
+  const f = setup(t, { remoteDryRun: true, attempt });
+  t.mock.method(ledger, 'commitOfflineVisionAttempt', async () => {
+    assert.equal(f.calls(), 0); assert.equal(f.loads(), 0); throw Error('Simulated denied admission');
+  });
+  f.begin(); await f.tick(); assert.equal(f.last().phase, 'screen-error'); assert.equal(f.calls(), 0); assert.equal(f.loads(), 0);
+  f.review(); assert.equal(f.approve(), false); f.confirm(); await f.tick(); assert.equal(f.calls(), 0);
 });

@@ -59,21 +59,23 @@ test('every expression target is finite and thinking is not sleep', () => {
   assert.ok(thinking.left.openness > 0.55);
   assert.ok(sleeping.left.openness <= EYE_CLOSED);
   assert.ok(sleeping.right.openness <= EYE_CLOSED);
-  assert.notEqual(thinking.left.openness, thinking.right.openness);
+  assert.equal(thinking.left.openness, thinking.right.openness);
   assert.notEqual(thinking.left.gazeYaw, thinking.right.gazeYaw);
   assert.equal(sleeping.left.tilt, sleeping.right.tilt);
 });
 
-test('curious and error eyes are asymmetric and idle eyes match', () => {
+test('curious and error eyes match in size and idle eyes match', () => {
   const curious = eyeTarget('CURIOUS', 0, true);
   const error = eyeTarget('ERROR', 0, true);
   const idle = eyeTarget('IDLE', 0, true);
-  assert.ok(curious.left.openness - curious.right.openness > 0.1);
-  assert.ok(curious.left.openness - curious.right.openness < 0.3);
-  assert.ok(curious.left.lift - curious.right.lift > 0.02);
-  assert.ok(curious.right.openness > 0.9);
-  assert.ok(error.left.openness - error.right.openness > 0.08);
-  assert.ok(error.right.openness > 0.75);
+  assert.equal(curious.left.openness, curious.right.openness);
+  assert.equal(curious.left.curvature, curious.right.curvature);
+  assert.equal(curious.left.lift, curious.right.lift);
+  assert.equal(curious.left.tilt, -curious.right.tilt);
+  assert.ok(curious.left.openness > 1.04);
+  assert.equal(error.left.openness, error.right.openness);
+  assert.equal(error.left.curvature, error.right.curvature);
+  assert.ok(error.left.openness > 0.75);
   assert.ok(error.left.glow > 0.95);
   assert.ok(error.right.glow > 0.95);
   assert.ok(curious.left.lift + curious.right.lift > error.left.lift + error.right.lift);
@@ -223,6 +225,11 @@ test('presence names stay the same and sleep still ignores them', () => {
   assert.equal(eyeCueFromState({ presence: 'THINKING', phase: 'TRACKING', tracking: true, preview: null }), 'THINKING');
   assert.equal(eyeCueFromState({ presence: null, phase: 'TRACKING', tracking: true, preview: null }), 'CURIOUS');
   assert.equal(eyeCueFromState({ presence: 'ATTENTIVE', phase: 'IDLE', tracking: false, preview: null }), 'LISTENING');
+  assert.equal(eyeCueFromState({ presence: null, phase: 'WAKING', tracking: false, preview: null }), 'SURPRISED');
+  const surprised = eyeTarget('SURPRISED', 0, true);
+  assert.equal(surprised.left.openness, surprised.right.openness);
+  assert.equal(surprised.left.curvature, surprised.right.curvature);
+  assert.ok(surprised.left.openness > eyeTarget('LISTENING', 0, true).left.openness);
   assert.equal(
     eyeCueFromState({ presence: null, phase: 'SLEEPING', tracking: true, preview: 'THINKING' as EyeCue }),
     'SLEEPING',

@@ -21,6 +21,7 @@ export const EYE_CUES = [
   'RESPONDING',
   'SPEAKING',
   'HAPPY',
+  'SURPRISED',
   'ERROR',
   'SLEEPING',
 ] as const;
@@ -94,6 +95,9 @@ export function eyeCueFromState(input: {
   if (input.preview) {
     return input.preview;
   }
+  if (input.phase === 'WAKING') {
+    return 'SURPRISED';
+  }
   if (input.presence === 'ATTENTIVE') {
     return 'LISTENING';
   }
@@ -134,8 +138,8 @@ export function writeEyeTarget(cue: EyeCue, now: number, reducedMotion: boolean,
   if (cue === 'CURIOUS') {
     assign(
       out,
-      { openness: 1.16, curvature: 1, lift: 0.03, tilt: 0.05, gazePitch: -0.02, glow: 1.04 },
-      { openness: 0.98, curvature: 1, lift: 0, tilt: 0, glow: 1 },
+      { openness: 1.1, curvature: 1, lift: 0.012, tilt: 0.06, gazePitch: -0.02, glow: 1.04 },
+      { openness: 1.1, curvature: 1, lift: 0.012, tilt: -0.06, gazePitch: -0.02, glow: 1.04 },
     );
     return;
   }
@@ -150,8 +154,8 @@ export function writeEyeTarget(cue: EyeCue, now: number, reducedMotion: boolean,
   if (cue === 'THINKING') {
     assign(
       out,
-      { openness: 0.78, curvature: 0.92, tilt: -0.08, gazeYaw: -0.06, gazePitch: -0.05, glow: 1 },
-      { openness: 0.96, curvature: 1.06, tilt: 0.1, gazeYaw: 0.05, gazePitch: 0.02, glow: 1 },
+      { openness: 0.9, curvature: 1, tilt: -0.08, gazeYaw: -0.05, gazePitch: -0.03, glow: 1 },
+      { openness: 0.9, curvature: 1, tilt: 0.08, gazeYaw: 0.05, gazePitch: -0.03, glow: 1 },
     );
     return;
   }
@@ -173,6 +177,14 @@ export function writeEyeTarget(cue: EyeCue, now: number, reducedMotion: boolean,
     );
     return;
   }
+  if (cue === 'SURPRISED') {
+    assign(
+      out,
+      { openness: 1.18, curvature: 1.04, lift: 0.018, tilt: 0.04, gazePitch: -0.05, glow: 1.12 },
+      { openness: 1.18, curvature: 1.04, lift: 0.018, tilt: -0.04, gazePitch: -0.05, glow: 1.12 },
+    );
+    return;
+  }
   if (cue === 'HAPPY') {
     assign(
       out,
@@ -184,8 +196,8 @@ export function writeEyeTarget(cue: EyeCue, now: number, reducedMotion: boolean,
   if (cue === 'ERROR') {
     assign(
       out,
-      { openness: 0.96, curvature: 0.96, lift: 0.006, tilt: 0.12, gazePitch: 0.03, glow: 1 },
-      { openness: 0.84, curvature: 0.96, lift: -0.01, tilt: -0.04, gazePitch: 0.04, glow: 1 },
+      { openness: 0.9, curvature: 0.98, lift: 0, tilt: 0.1, gazePitch: 0.03, glow: 1 },
+      { openness: 0.9, curvature: 0.98, lift: 0, tilt: -0.1, gazePitch: 0.03, glow: 1 },
     );
     return;
   }

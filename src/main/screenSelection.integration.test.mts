@@ -57,12 +57,14 @@ function image(width=250,height=150,patch:any={}):any {
   return {isEmpty:()=>false,getSize:()=>({width,height}),getScaleFactors:()=>[1],crop:(r:any)=>image(r.width,r.height),
     toPNG:()=>Buffer.from('synthetic-crop'),...patch};
 }
-function fixture(t:any,enabled=true){
+function fixture(t:any,enabled=true, extra:any={}){
   clampInitial=false;refuseContentBounds=false;contentInset=0;
   windows.length=0;requests=[];messages=[];allowed=true;held=false;restored=0;concealed=false;excluded=true;
   displays=[{id:7,bounds:{x:-200,y:50,width:200,height:120},workArea:{x:-200,y:50,width:200,height:110},scaleFactor:1.25}];
   composition=async()=>{};acquire=async()=>[{display_id:'7',thumbnail:image()}];
   const c=createScreenSelectionController({enabled,preloadPath:'C:\\fixture\\selection.js',canStart:()=>allowed,
+    ...(extra.page ? { page: extra.page } : {}),
+    ...(extra.bindAppProtocol ? { bindAppProtocol: extra.bindAppProtocol } : {}),
     onActive:(v:boolean)=>{held=v;},compositionReady:(signal:AbortSignal)=>composition(signal),
     conceal:()=>{concealed=true;return{verify:()=>excluded,restore:()=>{restored++;concealed=false;}};}});
   t.after(()=>c.destroy());
@@ -140,7 +142,8 @@ test('confirmed capture hides UI, awaits composition, then delivers only crop by
 });
 test('duplicate confirms acquire once',async t=>{const f=fixture(t);f.begin();f.select();f.confirm();f.confirm();await settle();assert.equal(requests.length,1);});
 test('failed composition readiness never acquires screen',async t=>{const f=fixture(t);composition=async()=>{throw Error('fixture');};f.begin();f.select();f.confirm();await settle();assert.equal(requests.length,0);assert.equal(f.c.active(),false);assert.equal(restored,1);});
-test('visible companion or unknown window fails exclusion before capture',async t=>{const f=fixture(t);excluded=false;f.begin();f.select();f.confirm();await settle();assert.equal(requests.length,0);assert.equal(restored,1);});
+test('visible companion or unknown window fails exclusion before capture',async t=>{const f=fixture(t);excluded=false;f.begin();f.select();f.confirm();await new Promise(r=>setTimeout(r,400));assert.equal(requests.length,0);assert.equal(restored,1);});
+test('a window shown again during composition is excluded before acquisition',async t=>{const f=fixture(t);f.begin();f.select();let waited=false;composition=async()=>{waited=true;excluded=false;};f.confirm();await settle();assert.equal(waited,true);assert.equal(requests.length,0);assert.equal(f.c.active(),false);assert.equal(restored,1);});
 test('display loss during selection cancels resources',t=>{const f=fixture(t);f.begin();displays=[];screen.emit('display-removed');assert.equal(f.c.active(),false);assert.equal(f.win().destroyed,true);assert.equal(requests.length,0);});
 test('multiple monitors rejected without thumbnail acquisition',t=>{const f=fixture(t);displays.push({...displays[0],id:8});f.c.start();assert.equal(windows.length,0);assert.equal(requests.length,0);});
 test('a shifted or resized selection surface cannot capture',async t=>{const f=fixture(t);f.begin();f.select();f.win().bounds={...f.win().bounds,x:0};f.confirm();await settle();assert.equal(requests.length,0);assert.equal(f.c.active(),false);});
@@ -161,11 +164,32 @@ test('new session never accepts stale old-session input',t=>{const f=fixture(t);
 test('preview close destroys temporary window and next selection works',async t=>{const f=fixture(t);f.begin();f.select();f.confirm();await settle();const w=f.win();w.destroy();assert.equal(f.c.active(),false);f.begin();assert.equal(windows.length,2);assert.equal(requests.length,1);});
 test('Quit destroys selector and removes every feature listener',t=>{const f=fixture(t);f.begin();f.c.destroy();assert.equal(f.win().destroyed,true);assert.equal(held,false);assert.equal(ipc.listenerCount('selection:confirm'),0);assert.equal(screen.listenerCount('display-added'),0);});
 test('active movement or chat/voice work refuses initiation',t=>{const f=fixture(t);allowed=false;f.c.start();assert.equal(windows.length,0);assert.equal(requests.length,0);});
+test('packaged selection binds the app protocol on its isolated session before loading',t=>{
+  let bound:any=null;
+  const f=fixture(t,true,{page:'app://companion/screen-selection.html',bindAppProtocol(ses:any){bound=ses;}});
+  f.c.start();
+  assert.equal(bound,isolated);
+  assert.equal(f.win().webContents.mainFrame.url,'app://companion/screen-selection.html');
+  let result:any;
+  isolated.network({url:'app://companion/assets/screenSelection.js'},(v:any)=>result=v);assert.equal(result.cancel,false);
+  isolated.network({url:'app://evil/screen-selection.html'},(v:any)=>result=v);assert.equal(result.cancel,true);
+  isolated.network({url:'https://example.com/upload'},(v:any)=>result=v);assert.equal(result.cancel,true);
+});
+test('development selection loads over HTTP without the packaged protocol binding',t=>{
+  let called=false;
+  const f=fixture(t,true,{bindAppProtocol(){called=true;}});
+  f.c.start();
+  assert.equal(called,false);
+  assert.equal(f.win().webContents.mainFrame.url,'http://127.0.0.1:5173/screen-selection.html');
+});
 test('permissions denied; preview-only CSP and network boundary are restrictive',t=>{
   const f=fixture(t);f.begin();assert.equal(f.win().options.webPreferences.sandbox,true);assert.equal(f.win().options.webPreferences.nodeIntegration,false);
   assert.equal(f.win().options.webPreferences.contextIsolation,true);assert.equal(f.win().options.webPreferences.webSecurity,true);
   assert.equal(isolated.check(),false);let granted=true;isolated.permission(null,'media',(v:boolean)=>granted=v);assert.equal(granted,false);
   let result:any;isolated.network({url:'https://example.com/upload'},(v:any)=>result=v);assert.equal(result.cancel,true);
+  isolated.network({url:'http://127.0.0.1:5173/assets/screen-selection.js'},(v:any)=>result=v);assert.equal(result.cancel,false);
+  isolated.network({url:'app://evil/screen-selection.html'},(v:any)=>result=v);assert.equal(result.cancel,true);
+  isolated.network({url:'blob:http://127.0.0.1:5173/crop'},(v:any)=>result=v);assert.equal(result.cancel,false);
   assert.match(SELECTION_CSP,/img-src blob:/);assert.match(SELECTION_CSP,/connect-src 'none'/);
   assert.equal(f.win().webContents.open().action,'deny');
 });
@@ -293,4 +317,19 @@ test('closing a real controller preview while screen rehearsal is pending cannot
   f.emit('vision',{type:'confirm-screen-dry-run',sessionId:id,token:f.notice().vision.screenToken,revision:2});await settle();
   const old=f.win();f.emit('cancel',id);const count=old.webContents.sent.length;await settle();
   assert.equal(old.destroyed,true);assert.equal(f.c.active(),false);assert.equal(old.webContents.sent.length,count);assert.equal(requests.length,1);
+});
+
+test('remote consent dry run uses the owned sender and main crop but ordinary startup provides no privileged B',async t=>{
+  let external=0;t.mock.method(globalThis,'fetch',()=>{external++;throw Error('No live provider');});
+  const f=fixture(t);enableVisionCrop();f.begin();f.select();f.confirm();await settle();const n=f.notice(),id=n.sessionId;
+  const edit={type:'edit',sessionId:id,question:'Exact invented question',revision:2,scenario:'success'};
+  f.emit('vision',edit);const review={...edit,type:'review-remote-dry-run'},count=f.win().webContents.sent.length;
+  ipc.emit('selection:vision',{sender:{},senderFrame:f.event().senderFrame},review);
+  for(const extra of [{image:'data:image/png;base64,forged'},{endpoint:'https://example.invalid'},{model:'other'},{approved:true}])f.emit('vision',{...review,...extra});
+  assert.equal(f.win().webContents.sent.length,count);f.emit('vision',review);
+  const r=f.notice().vision;assert.equal(r.screenReview.imageId,n.vision.imageId);assert.equal(r.screenReview.question,edit.question);
+  assert.equal(r.screenReview.purpose,'remote-transmission-consent');assert.equal(r.screenReview.execution,'dry-run-only');
+  f.emit('vision',{type:'confirm-remote-dry-run',sessionId:id,token:r.screenToken,revision:2});await settle();
+  assert.match(f.notice().vision.message,/Gate B is not active/);assert.equal(f.notice().vision.screenToken,undefined);
+  assert.equal(external,0);assert.equal(requests.length,1);f.emit('cancel',id);assert.equal(f.win().destroyed,true);
 });

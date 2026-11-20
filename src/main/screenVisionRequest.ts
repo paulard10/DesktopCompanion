@@ -1,6 +1,7 @@
 /** Main-only screen request contract and closed fake execution. NO live client. */
 import { createHash } from 'node:crypto';
-import { SCREEN_VISION_POLICY, VISION_SHARING, type ScreenVisionReview } from '../shared/offlineVision.js';
+import { SCREEN_VISION_POLICY, VISION_SHARING, VISION_CONSENT, type ScreenRequestReview } from '../shared/offlineVision.js';
+import { chatCompletionsUrl } from '../shared/qwenEndpoint.js';
 import { buildVisionRequest, normalizeVisionReply, type BuiltVisionRequest, type VisionFailure } from './qwenVisionAdapter.js';
 import { exchangeVisionRequestMock, isVisionMock, type OfflineVisionMock } from './qwenVisionMock.js';
 import type { ApprovedCrop } from './visionImage.js';
@@ -8,7 +9,7 @@ import type { LiveVisionResult } from './qwenVisionTransport.js';
 
 export const SCREEN_VISION_LIVE_DISABLED = true;
 export interface ScreenVisionWireRequest {
-  scope: Readonly<ScreenVisionReview>; request: BuiltVisionRequest; fingerprint: string;
+  scope: Readonly<ScreenRequestReview>; request: BuiltVisionRequest; fingerprint: string;
 }
 /** Main-only, synthetic execution evidence. Never a live permit or provider receipt. */
 export interface ScreenVisionExecutionEvidence {
@@ -24,9 +25,12 @@ export type ScreenVisionResult = ({ ok: true; kind: 'simulated-qwen-response'; t
 // cannot become a prepared attempt. Weak keys retain no encoded request or crop.
 const prepared = new WeakMap<ScreenVisionWireRequest, {
   fingerprint: string; consumed: boolean; dispatches: 0 | 1; httpStatus: number | null;
-  domain: 'offline-rehearsal' | 'test-only-remote-consent';
-  confirmed?: () => boolean;
+  domain: 'offline-rehearsal' | 'test-only-remote-consent' | 'one-shot-held';
+  armed?: boolean; confirmed?: () => boolean;
 }>();
+/** Main-only single POST ticket. It cannot be built or replayed by the renderer. */
+export interface ScreenVisionSendAdmission { readonly purpose: 'one-screen-vision-post' }
+const admissions = new WeakMap<ScreenVisionSendAdmission, { wire: ScreenVisionWireRequest; used: boolean }>();
 
 export interface ScreenVisionBridgeLease { readonly purpose: 'offline-screen-bridge-attempt' }
 const leases = new WeakMap<ScreenVisionBridgeLease, ScreenVisionWireRequest>();
@@ -86,19 +90,100 @@ export function releaseScreenVisionBridgeLease(lease: ScreenVisionBridgeLease): 
 }
 
 /** Same builder as the pilot, with a distinct policy/domain, never its permit. */
-export function prepareScreenVisionRequest(crop: ApprovedCrop, scope: Readonly<ScreenVisionReview>, endpoint: string):
+export function prepareScreenVisionRequest(crop: ApprovedCrop, scope: Readonly<ScreenRequestReview>, endpoint: string):
   { ok: true; wire: ScreenVisionWireRequest } | { ok: false; code: VisionFailure } {
   return prepare(crop, scope, endpoint, 'offline-rehearsal');
 }
 /** Dedicated main-only simulation. The review metadata remains offline; no live grant. */
-export function prepareScreenVisionRemoteConsentTest(crop: ApprovedCrop, scope: Readonly<ScreenVisionReview>, endpoint: string):
+export function prepareScreenVisionRemoteConsentTest(crop: ApprovedCrop, scope: Readonly<ScreenRequestReview>, endpoint: string):
   { ok: true; wire: ScreenVisionWireRequest } | { ok: false; code: VisionFailure } {
   return prepare(crop, scope, endpoint, 'test-only-remote-consent');
 }
-function prepare(crop: ApprovedCrop, scope: Readonly<ScreenVisionReview>, endpoint: string,
-  domain: 'offline-rehearsal' | 'test-only-remote-consent'):
+/** Real one-shot body. This module still does not read a credential or call fetch. */
+export function prepareScreenVisionOneShot(crop: ApprovedCrop, scope: Readonly<ScreenRequestReview>, endpoint: string):
   { ok: true; wire: ScreenVisionWireRequest } | { ok: false; code: VisionFailure } {
-  if (scope.purpose !== SCREEN_VISION_POLICY.purpose || scope.provider !== VISION_SHARING.provider ||
+  return prepare(crop, scope, endpoint, 'one-shot-held');
+}
+/** Mark the reviewed body eligible for one later admission. Does not consume it or touch a credential. */
+export function armOneScreenVisionSend(wire: ScreenVisionWireRequest):
+  { ok: true } | { ok: false; code: 'authorization' | 'duplicate' | 'expired' } {
+  const state = oneShotState(wire);
+  if (!state) return { ok: false, code: 'authorization' };
+  if (state.consumed || state.armed) return { ok: false, code: 'duplicate' };
+  if (Date.now() >= wire.scope.expiresAt || Date.now() >= wire.scope.previewExpiresAt) return { ok: false, code: 'expired' };
+  state.armed = true;
+  return { ok: true };
+}
+/** Consume the armed body and mint one non-serializable POST ticket. No credential and no network. */
+export function admitOneScreenVisionSend(wire: ScreenVisionWireRequest):
+  { ok: true; admission: ScreenVisionSendAdmission } | { ok: false; code: 'authorization' | 'duplicate' | 'expired' } {
+  const state = oneShotState(wire);
+  if (!state || !state.armed) return { ok: false, code: state?.consumed ? 'duplicate' : 'authorization' };
+  if (state.consumed) return { ok: false, code: 'duplicate' };
+  state.armed = false;
+  state.consumed = true;
+  if (Date.now() >= wire.scope.expiresAt || Date.now() >= wire.scope.previewExpiresAt) return { ok: false, code: 'expired' };
+  const admission = Object.freeze({ purpose: 'one-screen-vision-post' as const,
+    toJSON(): never { throw new Error('A screen send admission cannot be serialized.'); } });
+  admissions.set(admission, { wire, used: false });
+  return { ok: true, admission };
+}
+/** Single read of an admission. A second read, a copy, or a changed body returns null. */
+export function takeScreenVisionSendAdmission(admission: ScreenVisionSendAdmission): ScreenVisionWireRequest | null {
+  const held = admission && admissions.get(admission);
+  if (!held || held.used) return null;
+  held.used = true;
+  const wire = held.wire, state = prepared.get(wire);
+  if (!state || state.domain !== 'one-shot-held' || !oneShotState(wire)) return null;
+  return wire;
+}
+function oneShotState(wire: ScreenVisionWireRequest) {
+  const state = prepared.get(wire);
+  if (!state || state.domain !== 'one-shot-held' || wire.scope.purpose !== 'remote-transmission-consent' ||
+      wire.scope.execution !== 'one-shot-held' || wire.scope.maxRequests !== 1 ||
+      wire.request.body.model !== 'qwen3.7-plus' || wire.request.body.stream !== false ||
+      wire.request.body.enable_thinking !== false || wire.request.body.max_completion_tokens !== 160 ||
+      !chatCompletionsUrl(wire.request.url)) return null;
+  try {
+    if (wire.fingerprint !== state.fingerprint ||
+        createHash('sha256').update(JSON.stringify({ scope: wire.scope, request: wire.request })).digest('hex') !== state.fingerprint)
+      return null;
+  } catch { return null; }
+  return state;
+}
+/** Consume the prepared body and stop. Never reads a credential or calls fetch. */
+export function holdOneScreenVisionSend(wire: ScreenVisionWireRequest):
+  { ok: false; code: 'held'; message: string } | { ok: false; code: 'authorization' | 'duplicate' | 'expired' } {
+  const state = prepared.get(wire);
+  if (!state || state.domain !== 'one-shot-held' || wire.scope.purpose !== 'remote-transmission-consent' ||
+      wire.scope.execution !== 'one-shot-held' || wire.scope.maxRequests !== 1 ||
+      wire.request.body.model !== 'qwen3.7-plus' || wire.request.body.stream !== false ||
+      wire.request.body.enable_thinking !== false || wire.request.body.max_completion_tokens !== 160) return { ok: false, code: 'authorization' };
+  if (state.consumed) return { ok: false, code: 'duplicate' };
+  if (Date.now() >= wire.scope.expiresAt || Date.now() >= wire.scope.previewExpiresAt) return { ok: false, code: 'expired' };
+  try {
+    if (wire.fingerprint !== state.fingerprint ||
+        createHash('sha256').update(JSON.stringify({ scope: wire.scope, request: wire.request })).digest('hex') !== state.fingerprint)
+      return { ok: false, code: 'authorization' };
+  } catch { return { ok: false, code: 'authorization' }; }
+  state.consumed = true;
+  return { ok: false, code: 'held', message:
+    `Stopped before the external request. Crop ${wire.scope.width}×${wire.scope.height} px, ${wire.scope.pngBytes} bytes. ` +
+    `Question: ${wire.scope.question} Model qwen3.7-plus, Singapore, one POST, no retry. ` +
+    'The credential was not read and nothing was uploaded. A fresh approval of this exact crop and question is required before the first real send.' };
+}
+function prepare(crop: ApprovedCrop, scope: Readonly<ScreenRequestReview>, endpoint: string,
+  domain: 'offline-rehearsal' | 'test-only-remote-consent' | 'one-shot-held'):
+  { ok: true; wire: ScreenVisionWireRequest } | { ok: false; code: VisionFailure } {
+  const remote = scope.purpose === 'remote-transmission-consent';
+  const remoteOk = remote && scope.consentKind === VISION_CONSENT.remote && scope.maxRequests === 1 &&
+    ((scope.execution === 'dry-run-only' && domain === 'test-only-remote-consent') ||
+      (scope.execution === 'one-shot-held' && domain === 'one-shot-held'));
+  // The offline policy purpose can rehearse the fake consent path. It cannot mint a one-shot admission.
+  const offlineOk = scope.purpose === SCREEN_VISION_POLICY.purpose &&
+    (domain === 'offline-rehearsal' || domain === 'test-only-remote-consent');
+  if ((remote ? !remoteOk : !offlineOk) ||
+      scope.provider !== VISION_SHARING.provider ||
       scope.region !== VISION_SHARING.region || scope.model !== VISION_SHARING.model || scope.mime !== 'image/png' ||
       scope.endpointPolicy !== SCREEN_VISION_POLICY.endpointPolicy || scope.outputTokens !== 160 ||
       scope.timeoutMs !== 20000 || scope.responseBytes !== 65536 || scope.width !== crop.width ||
@@ -121,7 +206,7 @@ export async function executeScreenVisionMock(wire: ScreenVisionWireRequest, tra
     httpStatus: state?.httpStatus ?? null });
   const fail = (code: Extract<ScreenVisionResult, { ok: false }>['code'], outcome: 'failed' | 'unknown' | 'cancelled' = 'failed'):
     ScreenVisionResult => Object.freeze({ ok: false, code, outcome, evidence: evidence() });
-  if (!state) return fail('authorization');
+  if (!state || wire.scope.purpose === 'remote-transmission-consent') return fail('authorization'); // Remote-contract rehearsals require independent fake B.
   if (!isVisionMock(transport)) return fail('invalid-request');
   if (state.consumed || attempt.fakeDispatches !== 0) return fail('duplicate');
   state.consumed = true; // BEFORE async work; failure/cancellation cannot renew it.

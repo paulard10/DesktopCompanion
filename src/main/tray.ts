@@ -85,6 +85,28 @@ export function createTray(options: {
         },
       },
       {
+        label: 'Follow Cursor',
+        type: 'checkbox',
+        checked: options.isFollowing?.() ?? false,
+        click: (item) => {
+          options.onFollow?.(Boolean(item.checked));
+          refresh();
+        },
+      },
+      {
+        label: 'Show Home',
+        type: 'checkbox',
+        checked: options.isHome?.() ?? false,
+        click: (item) => {
+          options.onHome?.(Boolean(item.checked));
+          refresh();
+        },
+      },
+      { label: 'Hide Home', enabled: options.isHome?.() ?? false, click: () => { options.onHome?.(false); refresh(); } },
+      ...(options.onSelectScreenArea
+        ? [{ label: 'Select Screen Area', click: options.onSelectScreenArea }]
+        : []),
+      {
         label: 'Preferences',
         submenu: [
           {
@@ -124,14 +146,7 @@ export function createTray(options: {
       ...(options.devMovement
         ? [
             { type: 'separator' as const },
-            { label: 'Follow Cursor (Experimental)', type: 'checkbox' as const,
-              checked: options.isFollowing?.() ?? false,
-              click: (item: { checked?: boolean }) => { options.onFollow?.(Boolean(item.checked)); refresh(); } },
-            { label: 'Show Home (Experimental)', type: 'checkbox' as const,
-              checked: options.isHome?.() ?? false,
-              click: (item: { checked?: boolean }) => { options.onHome?.(Boolean(item.checked)); refresh(); } },
             { label: 'Test window move', click: () => options.onMoveTest?.() },
-            ...(options.onSelectScreenArea ? [{ label: 'Select Screen Area (Experimental)', click: options.onSelectScreenArea }] : []),
             { label: 'Reset Trail', click: () => options.onTrail?.('reset') },
             ...(options.devMarker
               ? [{ label: 'Show Trail Marker', click: () => options.onTrail?.('marker') }]

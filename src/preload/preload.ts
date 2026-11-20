@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 
 const FRAME_READY_CHANNEL = 'overlay:frame-ready';
 const CIRCLE_CLICK_CHANNEL = 'overlay:circle-click';
+const SELECT_SCREEN_CHANNEL = 'overlay:select-screen';
 const CURSOR_SAMPLE_CHANNEL = 'overlay:cursor-sample';
 const BEHAVIOR_CHANNEL = 'overlay:behavior';
 const EXPLORE_CHANNEL = 'overlay:explore';
@@ -28,6 +29,9 @@ contextBridge.exposeInMainWorld('companion', {
   },
   requestOpenChat(): void {
     ipcRenderer.send(OPEN_CHAT_CHANNEL);
+  },
+  requestSelectScreen(): void {
+    ipcRenderer.send(SELECT_SCREEN_CHANNEL);
   },
   onCursorSample(listener: (sample: CursorSamplePayload) => void): () => void {
     const wrapped = (_event: IpcRendererEvent, payload: unknown): void => {

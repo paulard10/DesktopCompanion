@@ -39,6 +39,8 @@ export interface AvatarPose {
   armRelax: number;
   /** Extra scale from the wake overshoot. 1 is rest. */
   wakeScale: number;
+  /** Vertical scale while accelerating. 1 is rest. Absent is rest. */
+  squash?: number;
   /** 1 is the normal eye arch. Kept for callers that predate the eye pair. */
   eyeScale: number;
   /** Stepped expression. Absent poses fall back to eyeScale. */
@@ -80,6 +82,27 @@ export function clickPulseScale(startedAtMs: number | null, nowMs: number): numb
 function wave(timeMs: number, periodMs: number, phaseTurns: number): number {
   const turns = timeMs / periodMs + phaseTurns;
   return Math.sin(turns * Math.PI * 2);
+}
+
+const BLINK_GAPS = [2600, 4300, 3100, 5600, 2400] as const;
+const BLINK_CYCLE_MS = 2600 + 4300 + 3100 + 5600 + 2400;
+
+/** Same eyelid shape as the fixed blink, with uneven gaps and one double-blink. */
+export function variedBlinkAmount(timeMs: number): number {
+  const phase = modulo(Number.isFinite(timeMs) ? timeMs : 0, BLINK_CYCLE_MS);
+  let cursor = 0;
+  for (const gap of BLINK_GAPS) {
+    if (phase < cursor + gap) {
+      const local = phase - cursor;
+      const primary = blinkAmount(local, gap);
+      if (gap === 2400 && local > 980) {
+        return Math.max(primary, blinkAmount(local - 760, gap));
+      }
+      return primary;
+    }
+    cursor += gap;
+  }
+  return 0;
 }
 
 export function blinkAmount(timeMs: number, periodMs = BLINK_PERIOD_MS): number {

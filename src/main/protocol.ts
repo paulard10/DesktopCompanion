@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { protocol } from 'electron';
+import { protocol, type Session } from 'electron';
 import { resolvePackagedRendererFile } from '../shared/packagedPath.js';
 
 const MIME_TYPES: Record<string, string> = {
@@ -29,7 +29,18 @@ export function registerAppScheme(): void {
 }
 
 export function registerAppProtocol(rendererRoot: string): void {
-  protocol.handle('app', async (request) => {
+  // The protocol module writes the default session. Other sessions need their own handler.
+  ensureAppProtocol(protocol, rendererRoot);
+}
+
+/** File handler for one session. A second call is a no-op so selection can reopen safely. */
+export function ensureAppProtocol(target: { handle: Session['protocol']['handle']; isProtocolHandled: Session['protocol']['isProtocolHandled'] }, rendererRoot: string): void {
+  if (target.isProtocolHandled('app')) return;
+  target.handle('app', createAppProtocolHandler(rendererRoot));
+}
+
+function createAppProtocolHandler(rendererRoot: string): (request: Request) => Promise<Response> {
+  return async (request) => {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return textResponse(405, 'Method not allowed');
     }
@@ -53,7 +64,7 @@ export function registerAppProtocol(rendererRoot: string): void {
     } catch {
       return textResponse(404, 'Not found');
     }
-  });
+  };
 }
 
 function textResponse(status: number, message: string): Response {

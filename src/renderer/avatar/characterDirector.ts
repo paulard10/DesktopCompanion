@@ -1,4 +1,4 @@
-import { ambientPose, blinkAmount, type AvatarPose } from '../../shared/ambientMotion';
+import { ambientPose, blinkAmount, variedBlinkAmount, type AvatarPose } from '../../shared/ambientMotion';
 
 declare global {
   interface ImportMeta {
@@ -43,6 +43,7 @@ import {
   WAKE_PREVIEW_MS,
 } from '../../shared/secondaryMotion';
 import { RIG_PROBE_MS, type RigProbeName } from '../../shared/rigProbe';
+import { applyIdleEyes, idleBeat } from '../../shared/idlePersonality';
 
 export interface CharacterFrame {
   pose: AvatarPose;
@@ -85,6 +86,8 @@ export function createCharacterDirector(): CharacterDirector {
   let poseTrace = '';
   let rigProbe: { name: RigProbeName; startedAt: number } | null = null;
   let traveling = false;
+  let travelBegan = Number.NEGATIVE_INFINITY;
+  let idleMarked = -1;
   let phaseListener: ((phase: Phase) => void) | null = null;
   let exploreDeferLogged = false;
 
@@ -111,6 +114,7 @@ export function createCharacterDirector(): CharacterDirector {
   return {
     wake(now: number): void {
       ensure(now);
+      blinkFastUntil = now + 900;
       commit(reduceBehavior(behavior, { type: 'WAKE' }, now));
     },
     sleep(now: number): void {
@@ -180,6 +184,8 @@ export function createCharacterDirector(): CharacterDirector {
       }
     },
     setTravel(moving: boolean): void {
+      if (moving && !traveling) travelBegan = performance.now();
+      if (!moving) travelBegan = Number.NEGATIVE_INFINITY;
       traveling = moving;
     },
     isAwake(): boolean {
@@ -235,6 +241,11 @@ export function createCharacterDirector(): CharacterDirector {
         preview,
       });
       writeEyeTarget(cue, now, reducedMotion, eyeGoal);
+      const canIdle = cue === 'IDLE' && behavior.phase === 'IDLE' && presence === null && !traveling && !reducedMotion;
+      const beat = canIdle ? idleBeat(now) : null;
+      if (beat?.active) {
+        applyIdleEyes(eyeGoal, beat.act);
+      }
       applyAlertness(eyeGoal, level, cue === 'SLEEPING');
       stepEyePairInto(eyes, eyes, eyeGoal, now - previousTick);
       const sleeping = cue === 'SLEEPING' || behavior.phase === 'SLEEPING' || behavior.phase === 'RETURNING_TO_SLEEP';
@@ -248,6 +259,11 @@ export function createCharacterDirector(): CharacterDirector {
         rigProbe = null;
       }
       noteSecondaryCue(secondaryClock, cue, now, sleeping);
+      if (beat?.active && beat.slot !== idleMarked && secondaryClock.gesture === 'none' && (beat.act === 'wave' || beat.act === 'happy')) {
+        idleMarked = beat.slot;
+        secondaryClock.gesture = beat.act === 'wave' ? 'wave' : 'bounce';
+        secondaryClock.startedAt = now;
+      }
       if (secondaryClock.gesture !== 'none' && now - secondaryClock.startedAt >= gestureDuration(secondaryClock.gesture)) {
         secondaryClock.gesture = 'none';
       }
@@ -301,12 +317,18 @@ export function createCharacterDirector(): CharacterDirector {
           gesture,
           now,
         ),
-        { traveling, alertness: level, presence, reducedMotion, now },
+        { traveling, alertness: level, presence, reducedMotion, now, travelAgeMs: traveling ? now - travelBegan : undefined },
       );
       if (gesture && gestureOffset(gesture.name, now - gesture.started) === null) {
         gesture = null;
       }
-      const blink = now < blinkFastUntil && level > 0.92 && cue !== 'SLEEPING' ? blinkAmount(now, 900) : pose.blink;
+      const blink = cue === 'SLEEPING'
+        ? pose.blink
+        : now < blinkFastUntil && level > 0.92
+          ? blinkAmount(now, 900)
+          : level > 0.92
+            ? variedBlinkAmount(now)
+            : pose.blink;
       const render = shouldRenderFrame(behavior.phase, now, lastRenderAt) || gesture !== null;
       if (render) {
         lastRenderAt = now;

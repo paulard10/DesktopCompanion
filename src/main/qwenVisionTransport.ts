@@ -7,7 +7,7 @@ import { chatCompletionsUrl } from '../shared/qwenEndpoint.js';
 import type { ProviderSettings } from './providerSettings.js';
 import type { KeyVault } from '../shared/keyVault.js';
 import type { PilotEvidence } from './visionPilotReceipt.js';
-import { readScreenVisionBridgeLease, type ScreenVisionBridgeLease } from './screenVisionRequest.js';
+import { readScreenVisionBridgeLease, takeScreenVisionSendAdmission, type ScreenVisionBridgeLease, type ScreenVisionSendAdmission } from './screenVisionRequest.js';
 import { createVisionBridgeHttpMock, isVisionBridgeDummy, loadVisionBridgeDummy, type VisionBridgeDummy } from './screenVisionBridgeFake.js';
 import { isVisionMock, type OfflineVisionMock } from './qwenVisionMock.js';
 
@@ -140,6 +140,43 @@ export async function executeOfflineScreenVisionExchange(lease: ScreenVisionBrid
   });
   diagnostics.responseText = null; // No pilot diagnostic/answer cache for screen content.
   return { result, invocations: diagnostics.postAttempts ? 1 : 0, httpStatus: diagnostics.httpStatus };
+}
+
+/**
+ * One admitted screen POST. LIVE_VISION_DISABLED still blocks the synthetic pilot.
+ * The admission ticket is the only way in: no renderer bytes, URL, key, or body are accepted.
+ * The credential is loaded only after that ticket is taken, and only one POST is attempted.
+ */
+export async function executeAdmittedScreenVisionPost(admission: ScreenVisionSendAdmission, options: {
+  vault: Pick<KeyVault, 'load'>; fetchImpl?: typeof fetch;
+}, signal?: AbortSignal): Promise<{ result: LiveVisionResult; posted: 0 | 1 }> {
+  const stopped = (code: Code): { result: LiveVisionResult; posted: 0 | 1 } => ({ result: fail(code), posted: 0 });
+  // Packaged release is allowed. The admission ticket, main process, and TLS policy remain mandatory.
+  // LIVE_VISION_DISABLED still blocks the separate synthetic pilot, including when packaged.
+  const denied = (): Code | null => process.type !== 'browser' ? 'disabled'
+    : process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0' ? 'tls-policy' : null;
+  const closed = denied(); if (closed) return stopped(closed);
+  const offline = options.fetchImpl !== undefined;
+  const fetcher = options.fetchImpl ?? globalThis.fetch;
+  if (!options || (offline && fetcher === globalThis.fetch)) return stopped('authorization');
+  const wire = takeScreenVisionSendAdmission(admission);
+  if (!wire) return stopped('authorization');
+  const fingerprint = (url: string, body: unknown): string => createHash('sha256').update(url).update('\0').update(JSON.stringify(body)).digest('hex');
+  const diagnostics: VisionPilotDiagnostics = { postAttempts: 0, httpStatus: null, providerRequestId: null, returnedModel: null,
+    finishReason: null, reasoningTokens: null, usage: null, providerErrorCode: null, providerErrorCategory: null,
+    responseBytes: 0, totalDurationMs: null, postDurationMs: null, responseText: null };
+  const result = await runQwenVisionExchange({
+    request: () => ({ ok: true, request: wire.request }),
+    fingerprint,
+    authorized: { id: wire.scope.requestId, snapshot: fingerprint(wire.request.url, wire.request.body), expiresAt: wire.scope.expiresAt },
+    options: { vault: options.vault },
+    blocked: denied,
+    diagnostics, offline, fetcher, signal,
+    setActive() { /* The caller's signal owns cancellation. */ },
+  });
+  const posted: 0 | 1 = diagnostics.postAttempts > 0 ? 1 : 0;
+  diagnostics.responseText = null;
+  return { result, posted };
 }
 
 /** Shared original bounded Qwen execution; only the gated factories in this module call it. */
