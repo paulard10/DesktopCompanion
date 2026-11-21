@@ -225,7 +225,7 @@ test('presence names stay the same and sleep still ignores them', () => {
   assert.equal(eyeCueFromState({ presence: 'THINKING', phase: 'TRACKING', tracking: true, preview: null }), 'THINKING');
   assert.equal(eyeCueFromState({ presence: null, phase: 'TRACKING', tracking: true, preview: null }), 'CURIOUS');
   assert.equal(eyeCueFromState({ presence: 'ATTENTIVE', phase: 'IDLE', tracking: false, preview: null }), 'LISTENING');
-  assert.equal(eyeCueFromState({ presence: null, phase: 'WAKING', tracking: false, preview: null }), 'SURPRISED');
+  assert.equal(eyeCueFromState({ presence: null, phase: 'WAKING', tracking: false, preview: null }), 'HAPPY');
   const surprised = eyeTarget('SURPRISED', 0, true);
   assert.equal(surprised.left.openness, surprised.right.openness);
   assert.equal(surprised.left.curvature, surprised.right.curvature);

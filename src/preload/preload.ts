@@ -45,9 +45,9 @@ contextBridge.exposeInMainWorld('companion', {
       ipcRenderer.removeListener(CURSOR_SAMPLE_CHANNEL, wrapped);
     };
   },
-  onBehavior(listener: (command: 'wake' | 'sleep') => void): () => void {
+  onBehavior(listener: (command: 'wake' | 'sleep' | 'engage' | 'linger' | 'hold' | 'release') => void): () => void {
     const wrapped = (_event: IpcRendererEvent, payload: unknown): void => {
-      if (payload === 'wake' || payload === 'sleep') {
+      if (payload === 'wake' || payload === 'sleep' || payload === 'engage' || payload === 'linger' || payload === 'hold' || payload === 'release') {
         listener(payload);
       }
     };

@@ -7,7 +7,7 @@ Desktop Companion is an Electron overlay: a transparent window, a procedural rob
 ## What it does
 
 - **A procedural robot.** White shell, black face, and matching neon-green eyes, drawn with Three.js. It blinks, changes expression, and adds small gestures while it is awake.
-- **Wake and sleep.** It starts asleep. Click the body, or choose Wake in the tray. After a quiet minute it returns to sleep. Moving the cursor does not wake it and does not postpone sleep.
+- **Wake and sleep.** It starts asleep. Click the body, or choose Wake in the tray. After about two minutes without a real interaction it looks sleepy, glides back to Home, docks, and sleeps. Follow Cursor keeps it awake while the pointer is actually moving. Chat, a screen selection, and a Qwen request do too. Moving the cursor does not wake it once it is asleep. Tray Sleep still sleeps immediately.
 - **Follow Cursor.** Turn this on from the tray and the robot glides after the pointer, with a lean, a small bank, and a lagging antenna.
 - **Home.** A dock is visible by default. The robot can return there and sleep.
 - **Neon trail.** While it travels, it leaves a short neon trail. The trail stops when the robot is asleep.
@@ -73,7 +73,7 @@ Screen sharing has its own confirmation. Drag a region, capture only that crop, 
 - Windows only. There is no macOS or Linux build.
 - No signed installer is published.
 - Follow Cursor stays off until you enable it.
-- The robot sleeps after about 60 seconds without a wake action.
+- The robot sleeps after about two minutes of quiet. Meaningful follow, chat, screen selection, and an in-progress Qwen request postpone that. Cursor movement does not wake a sleeping robot. If Home is hidden, it sleeps in place.
 - Click-through can fail against an elevated window. The tray has a temporary whole-window recovery switch for that case.
 - Speech input and spoken replies use this PC. They are optional and are not a cloud voice service.
 - Qwen calls depend on your key, quota, and the provider being reachable. The app does not switch models or retry a failed call.

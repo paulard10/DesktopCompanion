@@ -75,7 +75,7 @@ export const BEHAVIOR_PHASES = [
 
 export type BehaviorPhaseName = (typeof BEHAVIOR_PHASES)[number];
 
-export type BehaviorCommand = 'wake' | 'sleep';
+export type BehaviorCommand = 'wake' | 'sleep' | 'engage' | 'linger' | 'hold' | 'release';
 
 /** Screen DIP from the main-process cursor poll. No window titles or key state. */
 export interface CursorSample {

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { BEDTIME_LINGER_MS, QUIET_MS } from './activity.ts';
 import { ambientPose, HOVER_AMPLITUDE_WORLD } from './ambientMotion.ts';
 import { ORB_DIAMETER_DIP } from './clickThrough.ts';
 import { OVERLAY_HEIGHT_DIP, OVERLAY_WIDTH_DIP } from './placement.ts';
@@ -37,7 +38,9 @@ test('the robot starts asleep', () => {
   assert.equal(alertness(state, 0), 0);
 });
 
-test('wandering off still sleeps at the sixty second idle deadline', () => {
+test('an idle robot sleeps at the two minute quiet deadline', () => {
+  assert.equal(INACTIVITY_MS, QUIET_MS);
+  assert.equal(BEDTIME_LINGER_MS, 25_000);
   const idle = awakeAt(0);
   assert.equal(idle.exploreUntil, null);
   assert.equal(idle.sleepDeadline, INACTIVITY_MS);
@@ -243,18 +246,18 @@ test('a clock jump clamps the animation and still honors the sleep deadline', ()
   assert.equal(alertness(resumed, 5_000) < 1, true);
 
   const idle = awakeAt(0);
-  const afterGap = stepBehavior(idle, 90_000, true);
+  const afterGap = stepBehavior(idle, 130_000, true);
   assert.equal(afterGap.phase, 'RETURNING_TO_SLEEP');
-  assert.equal(afterGap.since, 90_000);
+  assert.equal(afterGap.since, 130_000);
   assert.equal(afterGap.sleepDeadline, null);
 
-  const finished = reduceBehavior(afterGap, { type: 'TICK' }, 90_000 + SLEEP_MS);
+  const finished = reduceBehavior(afterGap, { type: 'TICK' }, 130_000 + SLEEP_MS);
   assert.equal(finished.phase, 'SLEEPING');
 
-  const expiredWake = reduceBehavior(waking, { type: 'CLOCK_RESUME' }, 90_000);
+  const expiredWake = reduceBehavior(waking, { type: 'CLOCK_RESUME' }, 130_000);
   assert.equal(expiredWake.phase, 'RETURNING_TO_SLEEP');
   assert.ok(expiredWake.blendFrom > 0 && expiredWake.blendFrom < 1);
-  assert.equal(expiredWake.since, 90_000);
+  assert.equal(expiredWake.since, 130_000);
 });
 
 test('sleep skips frames and every other phase renders', () => {
@@ -357,6 +360,28 @@ test('the tray keeps show, hide, quit, and recovery, and adds wake and sleep', (
   assert.equal(renderer.includes('setIgnoreMouseEvents'), false);
   assert.equal(renderer.includes('pointermove'), false);
   assert.match(renderer, /scene\.wake\(/);
+});
+
+test('cursor samples never wake or postpone sleep, and a real activity note does', () => {
+  const asleep = initialBehavior(0);
+  assert.equal(reduceBehavior(asleep, { type: 'ENGAGE' }, 1_000).phase, 'SLEEPING');
+  const idle = awakeAt(0);
+  const watched = reduceBehavior(idle, { type: 'CURSOR', valid: true }, 10_000);
+  assert.equal(watched.sleepDeadline, idle.sleepDeadline);
+  const engaged = reduceBehavior(watched, { type: 'ENGAGE' }, 10_000);
+  assert.equal(engaged.phase, 'TRACKING');
+  assert.equal(engaged.sleepDeadline, 10_000 + INACTIVITY_MS);
+  const held = reduceBehavior(engaged, { type: 'HOLD' }, 20_000);
+  assert.equal(stepBehavior(held, held.sleepDeadline ?? 0, true).phase, 'TRACKING');
+  const released = reduceBehavior(held, { type: 'RELEASE' }, 30_000);
+  assert.equal(released.activityHold, false);
+  assert.equal(released.sleepDeadline, 30_000 + INACTIVITY_MS);
+  const kept = reduceBehavior(awakeAt(0), { type: 'LINGER' }, 1_000);
+  assert.equal(kept.sleepDeadline, INACTIVITY_MS);
+  const lingering = reduceBehavior({ ...awakeAt(0), sleepDeadline: 5_000 }, { type: 'LINGER' }, 1_000);
+  assert.equal(lingering.phase, 'IDLE');
+  assert.equal(lingering.sleepDeadline, 1_000 + BEDTIME_LINGER_MS);
+  assert.equal(reduceBehavior(initialBehavior(0), { type: 'LINGER' }, 1_000).phase, 'SLEEPING');
 });
 
 function awakeAt(now: number): BehaviorState {

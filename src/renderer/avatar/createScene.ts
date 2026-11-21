@@ -147,6 +147,22 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
         director.wake(now);
         return;
       }
+      if (command === 'engage') {
+        director.engage(now);
+        return;
+      }
+      if (command === 'linger') {
+        director.linger(now);
+        return;
+      }
+      if (command === 'hold') {
+        director.holdActivity(now);
+        return;
+      }
+      if (command === 'release') {
+        director.releaseActivity(now);
+        return;
+      }
       director.sleep(now);
     }) ?? (() => {});
   const stopExplore =

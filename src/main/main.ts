@@ -17,6 +17,7 @@ import { createInstalledLoginStartup } from './windowsLoginStartup.js';
 import { APP_USER_MODEL_ID } from '../shared/windowsLoginStartup.js';
 import { createUserPreferencesStore, type UserPreferencesStore } from '../shared/userPreferences.js';
 import { MOVE_TEST_DIP, travelBlock } from '../shared/desktopMovement.js';
+import { decideBedtime, quietDelayMs } from '../shared/activity.js';
 import { COMPANION_LAYOUT } from '../shared/companionLayout.js';
 import {
   WANDER_EXPLORE_MS,
@@ -65,6 +66,8 @@ let wanderEpoch = 0;
 let leaseTimer: ReturnType<typeof setTimeout> | null = null;
 let leaseEpoch = 0;
 let wanderClosed = false;
+let quietTimer: ReturnType<typeof setTimeout> | null = null;
+let bedtime = false;
 
 function clearWanderTimer(): void {
   wanderEpoch += 1;
@@ -82,6 +85,92 @@ function clearLeaseTimer(): void {
   }
 }
 
+function clearQuietTimer(): void {
+  if (quietTimer) {
+    clearTimeout(quietTimer);
+    quietTimer = null;
+  }
+}
+
+function userBusy(): boolean {
+  if (selectionHolding) {
+    return true;
+  }
+  const activity = chat?.activity();
+  return Boolean(activity && (activity.open || activity.listening || activity.speaking || activity.busy));
+}
+
+function armQuiet(): void {
+  clearQuietTimer();
+  if (quitting || bedtime || overlay?.wanderView()?.asleep) {
+    return;
+  }
+  quietTimer = setTimeout(() => {
+    quietTimer = null;
+    beginBedtime();
+  }, quietDelayMs());
+}
+
+function noteActivity(): void {
+  if (quitting || bedtime) {
+    return;
+  }
+  armQuiet();
+}
+
+function syncHold(): void {
+  if (!overlay || quitting) {
+    return;
+  }
+  if (userBusy()) {
+    clearQuietTimer();
+    overlay.holdActivity();
+    return;
+  }
+  overlay.releaseActivity();
+  if (!bedtime) {
+    armQuiet();
+  }
+}
+
+function beginBedtime(): void {
+  if (quitting || bedtime || !overlay) {
+    return;
+  }
+  const view = overlay.wanderView();
+  const phase = overlay.dockingPhase();
+  const decision = decideBedtime({
+    busy: userBusy(),
+    asleep: !view || view.asleep,
+    dock: phase === 'docked' ? 'docked' : phase === 'undocked' ? 'undocked' : 'busy',
+    homeAvailable: Boolean(home?.isEnabled() && home.getDockingBounds()),
+  });
+  if (decision === 'hold') {
+    syncHold();
+    return;
+  }
+  if (decision === 'later') {
+    if (view && !view.asleep) {
+      armQuiet();
+    }
+    return;
+  }
+  if (decision === 'sleep') {
+    overlay.sleep();
+    return;
+  }
+  bedtime = true;
+  overlay.setFollowEnabled(false);
+  overlay.setPresence('CLEAR');
+  overlay.linger();
+  const bounds = home?.getDockingBounds() ?? null;
+  if (bounds && overlay.requestDocking(bounds, true)) {
+    return;
+  }
+  bedtime = false;
+  overlay.sleep();
+}
+
 async function shutdown(): Promise<void> {
   if (quitting) {
     return;
@@ -93,6 +182,7 @@ async function shutdown(): Promise<void> {
   preferences?.close();
   clearWanderTimer();
   clearLeaseTimer();
+  clearQuietTimer();
   console.log('desktop-companion: quitting');
   if (smokeTimer) {
     clearTimeout(smokeTimer);
@@ -161,7 +251,12 @@ void app.whenReady().then(async () => {
     preloadPath: path.join(preloadPath(), '../chatPreload.js'),
     getAnchor: () => overlay?.getBounds() ?? { x: 0, y: 0, ...COMPANION_LAYOUT.windowDip },
     getWorkArea: (anchor) => screen.getDisplayMatching(anchor).workArea,
-    onActivity: () => overlay?.wake('chat'),
+    onActivity: () => {
+      bedtime = false;
+      overlay?.wake('chat');
+      syncHold();
+    },
+    onQuiet: () => syncHold(),
     onGesture: (gesture) => overlay?.gesture(gesture),
     onPresence: (presence) => overlay?.setPresence(presence),
     onEyePreview: (cue) => {
@@ -181,6 +276,8 @@ void app.whenReady().then(async () => {
     onEnabledChanged: () => tray?.refresh(),
     onActivate: () => {
       if (selectionHolding) return false;
+      bedtime = false;
+      noteActivity();
       const bounds = home?.getDockingBounds();
       return Boolean(bounds && overlay?.requestDocking(bounds));
     },
@@ -190,6 +287,13 @@ void app.whenReady().then(async () => {
   overlay = createOverlayWindow({
     dev,
     verifyWebGL: smoke,
+    onFollowActivity: () => {
+      if (quitting || bedtime || userBusy()) {
+        return;
+      }
+      overlay?.engage();
+      armQuiet();
+    },
     onFollowChanged: () => tray?.refresh(),
     onVisibilityChanged: (visible) => home?.setAppVisible(visible),
     onDesktopCursor: (sample) => { if (home?.isEnabled()) home.observe(sample); },
@@ -197,8 +301,14 @@ void app.whenReady().then(async () => {
     onDockingStart: () => applyWander(disableWander(wander, overlay?.wanderView()?.travelPhase ?? 'idle')),
     onDockingChanged: phase => {
       home?.feedback(phase === 'undocked' ? 'idle' : phase === 'docked' ? 'docked' : 'busy');
+      if (phase === 'docked') bedtime = false;
+      if (phase === 'undocked' && bedtime) {
+        bedtime = false;
+        overlay?.sleep();
+        return;
+      }
       if (selectionHolding) return;
-      if (phase === 'returning' || phase === 'settling') overlay?.setPresence('ATTENTIVE');
+      if ((phase === 'returning' || phase === 'settling') && !bedtime) overlay?.setPresence('ATTENTIVE');
       if (phase === 'docked') overlay?.setPresence('CLEAR');
     },
     preloadPath: preloadPath(),
@@ -220,11 +330,21 @@ void app.whenReady().then(async () => {
     onRobotPhase: (phase) => {
       if (phase === 'WAKING') {
         wander = noteWanderWake(wander, Date.now());
+        noteActivity();
+      }
+      if (phase === 'SLEEPING' || phase === 'RETURNING_TO_SLEEP') {
+        bedtime = false;
+        clearQuietTimer();
       }
       runWander();
     },
     onBodyHover: () => runWander(),
     onBodyClick: () => {
+      if (bedtime) {
+        bedtime = false;
+        overlay?.wake();
+      }
+      noteActivity();
       wander = noteWanderInteraction(wander);
       runWander();
     },
@@ -235,6 +355,7 @@ void app.whenReady().then(async () => {
       console.log('desktop-companion: frame-ready');
       if (!quitting && preferenceStore.current().startAwake) {
         overlay?.wake();
+        noteActivity();
       }
       if (!smoke) {
         return;
@@ -443,8 +564,10 @@ void app.whenReady().then(async () => {
         !activity?.open && !activity?.listening && !activity?.speaking && !activity?.busy;
     },
     onActive: (active) => {
+      if (active) bedtime = false;
       selectionHolding = active;
       overlay?.setSelectionHold(active);
+      syncHold();
       if (active) {
         selectionAttention = true;
         overlay?.setPresence('ATTENTIVE');
@@ -485,11 +608,15 @@ void app.whenReady().then(async () => {
     onShow: () => { selection?.cancel(); overlay?.show(); },
     onHide: () => { selection?.cancel(); overlay?.hide(); },
     onWake: () => {
+      bedtime = false;
       selection?.cancel();
       overlay?.show();
       overlay?.wake();
+      noteActivity();
     },
     onSleep: () => {
+      bedtime = false;
+      clearQuietTimer();
       selection?.cancel();
       const phase = overlay?.wanderView()?.travelPhase ?? 'idle';
       applyWander(endWanderSession(wander, phase));

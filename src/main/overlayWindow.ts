@@ -12,7 +12,8 @@ import {
 import { chatTriggerVisible, withChatTrigger } from '../shared/chatTrigger.js';
 import { screenAskVisible, withScreenAskTrigger } from '../shared/screenAskTrigger.js';
 import { readGesture } from '../shared/gesturePose.js';
-import { BEHAVIOR_PHASES, IpcChannels, type BehaviorPhaseName } from '../shared/ipc.js';
+import { nextMotionAnchor, type MotionAnchor } from '../shared/activity.js';
+import { BEHAVIOR_PHASES, IpcChannels, type BehaviorCommand, type BehaviorPhaseName } from '../shared/ipc.js';
 import { EYE_PREVIEW_CUES, type EyePreviewCue } from '../shared/faceExpression.js';
 import { isPresenceName } from '../shared/presence.js';
 import {
@@ -56,6 +57,10 @@ export interface OverlayController {
   hide: () => void;
   wake: (source?: 'tray' | 'chat') => void;
   sleep: () => void;
+  engage: () => void;
+  linger: () => void;
+  holdActivity: () => void;
+  releaseActivity: () => void;
   setExplore: (durationMs: number | null) => void;
   gesture: (name: string) => void;
   setPresence: (presence: 'ATTENTIVE' | 'THINKING' | 'RESPONDING' | 'SPEAKING' | 'HAPPY' | 'ERROR' | 'IDLE' | 'CLEAR') => void;
@@ -68,7 +73,7 @@ export interface OverlayController {
   stopMovement: () => void;
   moveTop: () => void;
   moveAboveHome: (source: string) => boolean;
-  requestDocking: (platform: HomeRect) => boolean;
+  requestDocking: (platform: HomeRect, quiet?: boolean) => boolean;
   cancelDocking: (reason?: string) => void;
   dockingPhase: () => DockPhase;
   wanderView: () => WanderSnapshot | null;
@@ -95,6 +100,7 @@ export function createOverlayWindow(options: {
   getDockPlatform?: () => HomeRect | null;
   onDockingStart?: () => void;
   onDockingChanged?: (phase: DockPhase) => void;
+  onFollowActivity?: () => void;
 }): OverlayController {
   const bounds = currentPlacement();
   const win = new BrowserWindow({
@@ -149,6 +155,7 @@ export function createOverlayWindow(options: {
   let lastPointerLogAt = 0;
   let robotPhase = 'SLEEPING';
   let follow = initialFollow();
+  let motionAnchor: MotionAnchor | null = null;
   let followSleepRequested = false;
   let animationSettingsAt = -Infinity;
   let reducedMotion = true;
@@ -344,6 +351,18 @@ export function createOverlayWindow(options: {
       cancelDocking('sleep-override');
       sendBehavior('sleep');
     },
+    engage(): void {
+      sendBehavior('engage', 'activity');
+    },
+    linger(): void {
+      sendBehavior('linger', 'activity');
+    },
+    holdActivity(): void {
+      sendBehavior('hold', 'activity');
+    },
+    releaseActivity(): void {
+      sendBehavior('release', 'activity');
+    },
     setExplore(durationMs: number | null): void {
       if (destroyed || win.isDestroyed()) {
         return;
@@ -527,7 +546,7 @@ export function createOverlayWindow(options: {
     options.onDockingChanged?.('undocked');
     if (options.dev) console.log(`desktop-companion: docking cancelled reason=${reason}`);
   }
-  function requestDocking(platform: HomeRect): boolean {
+  function requestDocking(platform: HomeRect, quiet = false): boolean {
     if (destroyed || win.isDestroyed() || !win.isVisible() || recoveryCapture || dockBlocked()) return false;
     if (dock) {
       if (dock.phase === 'docked') awakenDock('leave');
@@ -541,6 +560,12 @@ export function createOverlayWindow(options: {
     setFollowEnabled(false);
     haltTravel('fade');
     dock = { phase: 'waking', intent: 'dock', geometry, displayKey: context.key };
+    const alreadyAwake = robotPhase === 'IDLE' || robotPhase === 'TRACKING';
+    if (quiet && alreadyAwake) {
+      sendBehavior('linger', 'activity');
+      beginDockTravel();
+      return dock !== null;
+    }
     awakenDock('dock'); // Explicit interaction also refreshes the existing inactivity deadline.
     return dock !== null;
   }
@@ -769,6 +794,11 @@ export function createOverlayWindow(options: {
       }
       const before = follow.phase;
       follow = observeFollowCursor(follow, { x: cursor.x, y: cursor.y, at });
+      if (!robotAsleep()) {
+        const motion = nextMotionAnchor(motionAnchor, cursor, now);
+        motionAnchor = motion.anchor;
+        if (motion.noted) options.onFollowActivity?.();
+      }
       follow = planFollow(follow, followView(windowBounds), at);
       finishFollowStep(before);
     }
@@ -835,14 +865,14 @@ export function createOverlayWindow(options: {
     }
   }
 
-  function sendBehavior(command: 'wake' | 'sleep', source: 'tray' | 'chat' = 'tray'): void {
+  function sendBehavior(command: BehaviorCommand, source: 'tray' | 'chat' | 'activity' = 'tray'): void {
     if (destroyed || win.isDestroyed()) {
       return;
     }
     if (command === 'sleep') {
       followSleepRequested = true;
       stopFollowMotion('sleep-request');
-    } else {
+    } else if (command === 'wake') {
       followSleepRequested = false;
     }
     win.webContents.send(IpcChannels.behavior, command);
@@ -922,6 +952,7 @@ export function createOverlayWindow(options: {
       follow = enableFollow(live, followView(live).displayKey, performance.now());
     } else {
       follow = initialFollow();
+      motionAnchor = null;
     }
     finishFollowStep(before);
     options.onFollowChanged?.();

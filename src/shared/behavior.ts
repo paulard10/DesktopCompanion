@@ -1,13 +1,20 @@
 /**
  * Pure character behavior. Cursor samples never wake the robot and never
- * move the inactivity deadline. Wake and tray Sleep are the intentional events.
- * An exploration hold can defer the idle deadline once. It does not move that
- * deadline, and it never wakes a sleeping robot.
+ * move the inactivity deadline. Wake, tray Sleep, and explicit activity
+ * notes are the intentional events. An exploration hold can defer the idle
+ * deadline once. It does not move that deadline, and it never wakes a sleeping robot.
+ *
+ * INACTIVITY_MS matches activity.ts QUIET_MS. BEDTIME_LINGER_MS matches the
+ * dock window there. The node test runner loads this file as TypeScript, so
+ * the equality is checked from the test instead of a runtime import.
  */
 
 export const WAKE_MS = 700;
 export const SLEEP_MS = 800;
-export const INACTIVITY_MS = 60_000;
+/** Backstop if the main process never sends the robot home. Real quiet time is activity.ts QUIET_MS. */
+export const INACTIVITY_MS = 120_000;
+/** Keep the eyes open through one dock attempt. Matches activity.ts BEDTIME_LINGER_MS. */
+const BEDTIME_LINGER_MS = 25_000;
 /** Matches WANDER_EXPLORE_MS. A hold longer than this is cut so the robot cannot stay awake. */
 export const EXPLORE_HOLD_MS = 360_000;
 export const TARGET_LOST_MS = 400;
@@ -26,6 +33,8 @@ export interface BehaviorState {
   targetLostSince: number | null;
   lastTick: number;
   exploreUntil: number | null;
+  /** Chat, screen selection, or a live Qwen request. The robot's own motion never sets this. */
+  activityHold: boolean;
 }
 
 export type BehaviorEvent =
@@ -34,7 +43,11 @@ export type BehaviorEvent =
   | { type: 'CURSOR'; valid: boolean }
   | { type: 'TICK' }
   | { type: 'CLOCK_RESUME' }
-  | { type: 'EXPLORE'; until: number | null };
+  | { type: 'EXPLORE'; until: number | null }
+  | { type: 'ENGAGE' }
+  | { type: 'LINGER' }
+  | { type: 'HOLD' }
+  | { type: 'RELEASE' };
 
 export function initialBehavior(now: number): BehaviorState {
   return {
@@ -46,6 +59,7 @@ export function initialBehavior(now: number): BehaviorState {
     targetLostSince: null,
     lastTick: now,
     exploreUntil: null,
+    activityHold: false,
   };
 }
 
@@ -63,6 +77,14 @@ export function reduceBehavior(state: BehaviorState, event: BehaviorEvent, now: 
       return clockResume(state, now);
     case 'EXPLORE':
       return explore(state, event.until, now);
+    case 'ENGAGE':
+      return engage(state, now);
+    case 'LINGER':
+      return linger(state, now);
+    case 'HOLD':
+      return holdActivity(state, now);
+    case 'RELEASE':
+      return releaseActivity(state, now);
     default:
       return state;
   }
@@ -150,6 +172,7 @@ function userSleep(state: BehaviorState, now: number): BehaviorState {
       sleepDeadline: null,
       targetLostSince: null,
       exploreUntil: null,
+      activityHold: false,
     },
     now,
   );
@@ -230,7 +253,8 @@ function idleElapsed(state: BehaviorState, now: number): boolean {
   return (
     (state.phase === 'IDLE' || state.phase === 'TRACKING' || state.phase === 'WAKING') &&
     state.sleepDeadline !== null &&
-    now >= state.sleepDeadline
+    now >= state.sleepDeadline &&
+    !state.activityHold
   );
 }
 
@@ -247,7 +271,48 @@ function beginSleep(state: BehaviorState, now: number, blendFrom: number): Behav
     sleepDeadline: null,
     targetLostSince: null,
     exploreUntil: null,
+    activityHold: false,
   };
+}
+
+function awakePhase(state: BehaviorState): boolean {
+  return state.phase === 'WAKING' || state.phase === 'IDLE' || state.phase === 'TRACKING';
+}
+
+/** Extends quiet time. A sleeping robot stays asleep. */
+function engage(state: BehaviorState, now: number): BehaviorState {
+  if (!awakePhase(state)) {
+    return stamp(state, now);
+  }
+  const deadline = now + INACTIVITY_MS;
+  if (state.sleepDeadline !== null && state.sleepDeadline >= deadline) {
+    return stamp(state, now);
+  }
+  return stamp({ ...state, sleepDeadline: deadline }, now);
+}
+
+/** Keeps the current pose awake long enough to dock, without starting another two minutes. */
+function linger(state: BehaviorState, now: number): BehaviorState {
+  if (!awakePhase(state)) {
+    return stamp(state, now);
+  }
+  const deadline = now + BEDTIME_LINGER_MS;
+  const sleepDeadline = state.sleepDeadline !== null && state.sleepDeadline > deadline ? state.sleepDeadline : deadline;
+  return stamp({ ...state, sleepDeadline }, now);
+}
+
+function holdActivity(state: BehaviorState, now: number): BehaviorState {
+  if (!awakePhase(state)) {
+    return stamp(state, now);
+  }
+  return stamp({ ...state, activityHold: true }, now);
+}
+
+function releaseActivity(state: BehaviorState, now: number): BehaviorState {
+  if (!awakePhase(state)) {
+    return stamp({ ...state, activityHold: false }, now);
+  }
+  return stamp({ ...state, activityHold: false, sleepDeadline: now + INACTIVITY_MS }, now);
 }
 
 function stamp(state: BehaviorState, now: number): BehaviorState {

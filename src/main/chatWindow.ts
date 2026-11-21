@@ -41,6 +41,7 @@ export async function createChatController(options: {
   getAnchor: () => ChatRect;
   getWorkArea: (anchor: ChatRect) => ChatRect;
   onActivity: () => void;
+  onQuiet?: () => void;
   onGesture: (gesture: RobotGesture) => void;
   onPresence: (presence: 'ATTENTIVE' | 'THINKING' | 'RESPONDING' | 'SPEAKING' | 'HAPPY' | 'ERROR' | 'IDLE' | 'CLEAR') => void;
   onEyePreview: (cue: EyePreviewCue) => void;
@@ -482,6 +483,7 @@ export async function createChatController(options: {
     options.onEyePreview('CLEAR');
     publishOverlayPresence();
     win.hide();
+    options.onQuiet?.();
     console.log('desktop-companion: chat-hide');
   }
 

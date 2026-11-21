@@ -96,7 +96,7 @@ export function eyeCueFromState(input: {
     return input.preview;
   }
   if (input.phase === 'WAKING') {
-    return 'SURPRISED';
+    return 'HAPPY';
   }
   if (input.presence === 'ATTENTIVE') {
     return 'LISTENING';

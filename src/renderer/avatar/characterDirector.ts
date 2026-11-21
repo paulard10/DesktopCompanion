@@ -54,6 +54,10 @@ export interface CharacterFrame {
 export interface CharacterDirector {
   wake(now: number): void;
   sleep(now: number): void;
+  engage(now: number): void;
+  linger(now: number): void;
+  holdActivity(now: number): void;
+  releaseActivity(now: number): void;
   setExplore(durationMs: number | null, now: number): void;
   noteCursor(sample: CursorSample): void;
   playGesture(name: RobotGesture, now: number): void;
@@ -88,6 +92,7 @@ export function createCharacterDirector(): CharacterDirector {
   let traveling = false;
   let travelBegan = Number.NEGATIVE_INFINITY;
   let idleMarked = -1;
+  let dozing = false;
   let phaseListener: ((phase: Phase) => void) | null = null;
   let exploreDeferLogged = false;
 
@@ -114,12 +119,32 @@ export function createCharacterDirector(): CharacterDirector {
   return {
     wake(now: number): void {
       ensure(now);
+      dozing = false;
       blinkFastUntil = now + 900;
       commit(reduceBehavior(behavior, { type: 'WAKE' }, now));
     },
     sleep(now: number): void {
       ensure(now);
+      dozing = false;
       commit(reduceBehavior(behavior, { type: 'USER_SLEEP' }, now));
+    },
+    engage(now: number): void {
+      ensure(now);
+      commit(reduceBehavior(behavior, { type: 'ENGAGE' }, now));
+    },
+    linger(now: number): void {
+      ensure(now);
+      dozing = behavior.phase === 'WAKING' || behavior.phase === 'IDLE' || behavior.phase === 'TRACKING';
+      commit(reduceBehavior(behavior, { type: 'LINGER' }, now));
+    },
+    holdActivity(now: number): void {
+      ensure(now);
+      commit(reduceBehavior(behavior, { type: 'HOLD' }, now));
+    },
+    releaseActivity(now: number): void {
+      ensure(now);
+      dozing = false;
+      commit(reduceBehavior(behavior, { type: 'RELEASE' }, now));
     },
     setExplore(durationMs: number | null, now: number): void {
       ensure(now);
@@ -231,20 +256,27 @@ export function createCharacterDirector(): CharacterDirector {
       const reducedMotion = prefersReducedMotion();
       if (behavior.phase === 'SLEEPING' || behavior.phase === 'RETURNING_TO_SLEEP') {
         preview = null;
+        dozing = false;
         blinkFastUntil = Number.NEGATIVE_INFINITY;
         wakePreviewUntil = Number.NEGATIVE_INFINITY;
       }
       const cue = eyeCueFromState({
         presence,
         phase: behavior.phase,
-        tracking: behavior.phase === 'TRACKING',
+        tracking: traveling,
         preview,
       });
       writeEyeTarget(cue, now, reducedMotion, eyeGoal);
-      const canIdle = cue === 'IDLE' && behavior.phase === 'IDLE' && presence === null && !traveling && !reducedMotion;
+      const canIdle = cue === 'IDLE' && behavior.phase === 'IDLE' && presence === null && !traveling && !reducedMotion && !dozing;
       const beat = canIdle ? idleBeat(now) : null;
       if (beat?.active) {
         applyIdleEyes(eyeGoal, beat.act);
+      }
+      if (dozing && (cue === 'IDLE' || cue === 'CURIOUS')) {
+        eyeGoal.left.openness = 0.72;
+        eyeGoal.right.openness = 0.72;
+        eyeGoal.left.gazePitch = 0.04;
+        eyeGoal.right.gazePitch = 0.04;
       }
       applyAlertness(eyeGoal, level, cue === 'SLEEPING');
       stepEyePairInto(eyes, eyes, eyeGoal, now - previousTick);
