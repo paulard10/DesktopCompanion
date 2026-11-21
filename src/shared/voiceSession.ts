@@ -67,18 +67,15 @@ export function overlayForVoicePhase(phase: VoicePhase): 'ATTENTIVE' | 'THINKING
   return null;
 }
 
+export type VoiceStatusName = '' | 'Listening' | 'Transcribing' | 'Thinking' | 'Speaking' | 'Paused';
+
 export function voicePhaseLabel(phase: VoicePhase, errorKind: VoiceErrorKind | null, enabled: boolean): string {
-  if (!enabled) {
-    return '';
-  }
+  void errorKind;
   if (phase === 'RECORDING') {
-    return 'Recording';
+    return 'Listening';
   }
   if (phase === 'TRANSCRIBING') {
     return 'Transcribing';
-  }
-  if (phase === 'DRAFT_READY') {
-    return 'Ready to send';
   }
   if (phase === 'WAITING_FOR_AI' || phase === 'AI_RESPONDING') {
     return 'Thinking';
@@ -86,16 +83,67 @@ export function voicePhaseLabel(phase: VoicePhase, errorKind: VoiceErrorKind | n
   if (phase === 'SPEAKING') {
     return 'Speaking';
   }
-  if (phase === 'ERROR' && errorKind === 'memory') {
-    return 'Memory insufficient';
+  if (phase === 'DRAFT_READY' || phase === 'ERROR' || phase === 'CANCELLING') {
+    return 'Paused';
   }
-  if (phase === 'ERROR' && errorKind === 'denied') {
-    return 'Microphone denied';
+  return enabled ? 'Paused' : '';
+}
+
+/** One label for tap-to-talk and the conversation loop. */
+export function visibleVoiceState(input: {
+  conversation: boolean;
+  phase: VoicePhase;
+  capture: 'idle' | 'requesting' | 'recording' | 'transcribing';
+  speaking: boolean;
+  thinking: boolean;
+}): VoiceStatusName {
+  if (input.speaking || input.phase === 'SPEAKING') {
+    return 'Speaking';
   }
-  if (phase === 'CANCELLING') {
-    return 'Conversation ready';
+  if (input.capture === 'transcribing' || input.phase === 'TRANSCRIBING') {
+    return 'Transcribing';
   }
-  return 'Conversation ready';
+  if (input.thinking || input.phase === 'WAITING_FOR_AI' || input.phase === 'AI_RESPONDING') {
+    return 'Thinking';
+  }
+  if (input.capture === 'recording' || input.capture === 'requesting' || input.phase === 'RECORDING') {
+    return 'Listening';
+  }
+  if (input.conversation) {
+    return 'Paused';
+  }
+  return '';
+}
+
+/** Automatic send is opt-in for this chat session and never replaces an existing draft. */
+export function shouldAutoSubmitTurn(input: {
+  conversation: boolean;
+  autoSubmit: boolean;
+  placement: 'insert' | 'stage';
+}): boolean {
+  return input.conversation && input.autoSubmit && input.placement === 'insert';
+}
+
+/** The microphone stays closed while the robot speaks, after Stop, and after a denied permission. */
+export function shouldResumeListening(input: {
+  conversation: boolean;
+  allowResume: boolean;
+  permissionDenied: boolean;
+  speaking: boolean;
+  captureBusy: boolean;
+  awaitingSend: boolean;
+}): boolean {
+  return input.conversation
+    && input.allowResume
+    && !input.permissionDenied
+    && !input.speaking
+    && !input.captureBusy
+    && !input.awaitingSend;
+}
+
+/** Listening, a paused confirmation, and playback keep the robot awake. */
+export function voiceSessionHold(input: { live: boolean; captureBusy: boolean; speaking: boolean }): boolean {
+  return input.live || input.captureBusy || input.speaking;
 }
 
 export function shouldSpeakCompletedReply(input: {

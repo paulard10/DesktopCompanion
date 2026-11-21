@@ -1,6 +1,7 @@
-import { MAX_RECORDING_SECONDS, SPEECH_RATE, pcmWav } from '../shared/speechAudio.ts';
-import { speechLanguage, type SpeechLanguage } from '../shared/textToSpeech.ts';
+import { MAX_RECORDING_SECONDS, SPEECH_RATE, noteSpeechEndpoint, pcmWav, speechRms } from '../shared/speechAudio.ts';
 import type { ChatBridge } from '../shared/ipc.ts';
+
+type CaptureLanguage = 'es' | 'en' | 'auto';
 
 export type SpeechState = 'idle' | 'requesting' | 'recording' | 'transcribing';
 
@@ -25,7 +26,10 @@ export class SpeechCapture {
   private chunks: Float32Array[] = [];
   private samples = 0;
   private startedAt = 0;
-  private language: SpeechLanguage = 'auto';
+  private language: CaptureLanguage = 'auto';
+  private endpoint = false;
+  private heardMs = 0;
+  private silenceMs = 0;
 
   constructor(
     bridge: SpeechBridge,
@@ -45,8 +49,13 @@ export class SpeechCapture {
 
   get currentState(): SpeechState { return this.state; }
 
-  setLanguage(language: SpeechLanguage): void {
-    this.language = speechLanguage(language);
+  setLanguage(language: CaptureLanguage): void {
+    this.language = language === 'en' || language === 'auto' ? language : 'es';
+  }
+
+  /** Conversation mode ends an utterance on quiet. Tap and hold stay manual. */
+  setSilenceDetection(enabled: boolean): void {
+    this.endpoint = enabled;
   }
 
   async start(): Promise<void> {
@@ -71,6 +80,8 @@ export class SpeechCapture {
       this.processor = context.createScriptProcessor(2048, 1, 1);
       this.chunks = [];
       this.samples = 0;
+      this.heardMs = 0;
+      this.silenceMs = 0;
       this.processor.onaudioprocess = (event): void => {
         if (this.state !== 'recording') return;
         const input = event.inputBuffer.getChannelData(0);
@@ -81,6 +92,16 @@ export class SpeechCapture {
         }
         this.chunks.push(new Float32Array(input));
         this.samples += input.length;
+        if (!this.endpoint) return;
+        const frameMs = (input.length / SPEECH_RATE) * 1000;
+        const next = noteSpeechEndpoint(
+          { heardMs: this.heardMs, silenceMs: this.silenceMs },
+          speechRms(input),
+          frameMs,
+        );
+        this.heardMs = next.heardMs;
+        this.silenceMs = next.silenceMs;
+        if (next.ended) void this.stop();
       };
       this.source.connect(this.processor);
       this.processor.connect(context.destination);
@@ -116,6 +137,7 @@ export class SpeechCapture {
   async stop(): Promise<void> {
     if (this.state !== 'recording') return;
     const token = this.generation;
+    this.setState('transcribing');
     this.releaseMicrophone();
     let wav: Uint8Array;
     try {
@@ -126,7 +148,6 @@ export class SpeechCapture {
     }
     this.chunks = [];
     this.samples = 0;
-    this.setState('transcribing');
     try {
       const result = await this.bridge.transcribeAudio(wav, this.language);
       wav.fill(0);

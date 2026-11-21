@@ -11,8 +11,8 @@ Desktop Companion is an Electron overlay: a transparent window, a procedural rob
 - **Follow Cursor.** Turn this on from the tray and the robot glides after the pointer, with a lean, a small bank, and a lagging antenna.
 - **Home.** A dock is visible by default. The robot can return there and sleep.
 - **Neon trail.** While it travels, it leaves a short neon trail. The trail stops when the robot is asleep.
-- **Chat.** Open it from the badge, a second click on an awake robot, or the tray. Demo mode answers locally and sends nothing over the network.
-- **Voice.** Hold the microphone button, speak in Spanish or English, and release. The transcript appears in the message box for you to correct before Send. A voice question can be read aloud with a Windows voice already installed on this PC. Typed messages stay silent unless you turn Conversation on.
+- **Chat.** Open it from the badge, a second click on an awake robot, or the tray. The window is a short conversation: messages, one text box, a microphone, and Send. Connection details and extra voice options stay in Settings. Demo mode answers locally and sends nothing over the network.
+- **Voice.** Click the microphone to record and click it again to transcribe. The text stays in the box until you press Send. Hold to talk is in Settings. Conversation mode is also in Settings and stays off until you turn it on. Replies can be spoken with a Windows voice already installed on this PC.
 - **Qwen.** Switch the chat provider to Qwen to use your own Alibaba Cloud Model Studio key. Chat uses `qwen3.7-plus` through the Singapore endpoint. The conversation stays in memory on this PC.
 - **Screen vision, only with consent.** Choose a rectangle, confirm the crop, read what will be sent, and click **Ask Qwen**. One click sends that crop and your question once. There is no automatic retry, and nothing is captured before you confirm.
 - **Click-through.** The body, chat badge, and screen button accept clicks. The transparent desktop around them does not.
@@ -59,8 +59,8 @@ npm run dev
 
 Demo mode is the default and does not call Alibaba. To use Qwen:
 
-1. Open chat and expand **Connection**.
-2. Choose **Qwen**.
+1. Open chat and choose **Settings**.
+2. Expand **Connection**, then choose **Qwen**.
 3. Keep the Singapore Model Studio endpoint, or save the endpoint from your own workspace.
 4. Paste your API key and choose **Save key**.
 5. Remove it later with **Remove API key** if you want it gone from this PC.
@@ -71,9 +71,13 @@ Screen sharing has its own confirmation. Drag a region, capture only that crop, 
 
 ## Voice
 
-Hold **Hold** in the chat composer, speak, then release. Local transcription fills the message box. Edit it if needed, then use the normal Send button. Only that approved text is sent to Qwen. The recording is not kept, and the microphone is not left open.
+The chat composer has one microphone. Click it to start, then click it again. Local transcription fills the message box. Edit it if needed, then use Send. Nothing is sent until you press Send.
 
-While the robot listens it looks attentive, with a small antenna sway and a greener glow. Transcription and waiting use the thinking expression. Speaking moves the eyes, antenna, and both arms together. **Stop speech** ends playback. **Mute** turns spoken replies off. Tray Sleep stops recording and speech immediately.
+**Hold to talk** is in Settings. Press the microphone and release it to transcribe.
+
+**Conversation mode** is in Settings and is off until you check it. It listens, stops on a short silence, and transcribes locally. The recognized text stays in the box for Send unless you also check **Send turns automatically** for this chat. That option starts off and is not remembered. After a spoken reply, it listens again. It does not listen while the robot is speaking. While it is on, the window says **Conversation active** and shows **Stop**. Closing chat or Tray Sleep stops the microphone and does not turn it back on.
+
+The status line shows Listening, Transcribing, Thinking, Speaking, or Paused. Listening looks attentive. Transcription and the wait for Qwen use the thinking expression. Speaking moves the eyes, antenna, and both arms together. A finished reply settles through the existing happy, then relaxed, pose. **Stop speech** ends playback. **Mute** turns spoken replies off.
 
 Spoken replies use a voice installed in Windows. Spanish prefers Microsoft Pablo when it is present, and otherwise a local Spanish voice such as Microsoft Helena. English uses a local voice such as Microsoft Zira. Online voices are ignored. If neither language has a local voice, typing and sending still work.
 

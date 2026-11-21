@@ -13,6 +13,7 @@ const MOVE_TEST_CHANNEL = 'chat:move-test';
 const CLOSE_CHANNEL = 'chat:close';
 const MINIMIZE_CHANNEL = 'chat:minimize';
 const ACTIVITY_CHANNEL = 'chat:activity';
+const CONVERSATION_CHANNEL = 'chat:conversation';
 const HISTORY_CHANNEL = 'chat:history';
 const FOCUS_CHANNEL = 'chat:focus';
 const DELTA_CHANNEL = 'chat:delta';
@@ -133,6 +134,9 @@ contextBridge.exposeInMainWorld('chat', {
   },
   notifyActivity(): void {
     ipcRenderer.send(ACTIVITY_CHANNEL);
+  },
+  notifyConversation(active: boolean): void {
+    ipcRenderer.send(CONVERSATION_CHANNEL, active === true);
   },
   async armMicrophone(): Promise<boolean> {
     return (await ipcRenderer.invoke(SPEECH_ARM)) === true;

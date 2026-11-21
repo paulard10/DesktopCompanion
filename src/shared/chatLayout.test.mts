@@ -32,10 +32,13 @@ test('the conversation column keeps the welcome text off the composer', () => {
   assert.match(html, /Enter sends/);
   const connection = html.slice(html.indexOf('<details id="connection"'), html.indexOf('>', html.indexOf('<details id="connection"')) + 1);
   const tools = html.slice(html.indexOf('<details id="developer"'), html.indexOf('>', html.indexOf('<details id="developer"')) + 1);
-  const more = html.slice(html.indexOf('<details class="more"'), html.indexOf('>', html.indexOf('<details class="more"')) + 1);
+  const settings = html.slice(html.indexOf('<div id="settings"'), html.indexOf('>', html.indexOf('<div id="settings"')) + 1);
   assert.equal(/\sopen[\s>]/.test(connection), false);
   assert.equal(/\sopen[\s>]/.test(tools), false);
-  assert.equal(/\sopen[\s>]/.test(more), false);
+  assert.match(settings, /\shidden[\s>]/);
+  assert.equal(html.includes('id="mic-tap"'), false);
+  assert.equal(html.includes('id="mic-hold"'), false);
+  assert.match(html, /id="hold-to-talk"(?![^>]*checked)/);
   assert.match(tools, /\shidden[\s>]/);
   assert.match(html, /Developer Tools/);
   assert.equal(html.includes('Dev preview'), false);

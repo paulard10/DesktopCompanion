@@ -15,6 +15,7 @@ export const IpcChannels = {
   chatClose: 'chat:close',
   chatMinimize: 'chat:minimize',
   chatActivity: 'chat:activity',
+  chatConversation: 'chat:conversation',
   chatHistory: 'chat:history',
   chatFocus: 'chat:focus',
   chatDelta: 'chat:delta',
@@ -163,6 +164,7 @@ export interface ChatBridge {
   closeChat: () => void;
   minimizeChat: () => void;
   notifyActivity: () => void;
+  notifyConversation: (active: boolean) => void;
   onHistory: (listener: (lines: readonly ChatLineMessage[]) => void) => () => void;
   onFocusComposer: (listener: () => void) => () => void;
   onDelta: (listener: (text: string) => void) => () => void;

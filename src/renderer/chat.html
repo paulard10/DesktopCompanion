@@ -15,61 +15,32 @@
           <p id="status" class="status">Demo. No AI connected.</p>
         </div>
         <div class="controls">
+          <button type="button" id="settings-toggle" aria-label="Settings" aria-expanded="false" aria-controls="settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 3.5v2.2M12 18.3V20.5M4.9 6.4l1.6 1.6M17.5 16l1.6 1.6M3.5 12h2.2M18.3 12h2.2M4.9 17.6 6.5 16M17.5 8l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          </button>
           <button type="button" id="minimize" aria-label="Minimize chat">–</button>
           <button type="button" id="close" aria-label="Close chat">×</button>
         </div>
       </header>
-      <details id="connection" class="connection">
-        <summary>Connection</summary>
-        <div class="connection-body">
-          <p id="preflight" class="preflight" hidden>
-            Stop-on-Exhaust is a switch in the Alibaba console for qwen3.7-plus. This app cannot see that switch.
-            Confirm it is still on before you send. A previous check showed 1,000,000 free tokens expiring 2027-01-21.
-            This app does not know whether that quota is still available, and it will not switch models or retry a failed call.
-          </p>
-          <fieldset class="provider-choice">
-            <legend>Provider</legend>
-            <label><input type="radio" name="provider" value="demo" checked /> Demo</label>
-            <label><input type="radio" name="provider" value="qwen" /> Qwen</label>
-          </fieldset>
-          <p class="model-name">Model <strong>qwen3.7-plus</strong></p>
-          <label class="stack" for="endpoint">Singapore endpoint</label>
-          <input id="endpoint" type="url" autocomplete="off" spellcheck="false" placeholder="https://workspace.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1" />
-          <button type="button" id="save-endpoint">Save endpoint</button>
-          <label class="stack" for="api-key">API key</label>
-          <input id="api-key" type="password" autocomplete="off" spellcheck="false" />
-          <div class="key-actions">
-            <button type="button" id="save-key">Save key</button>
-            <button type="button" id="remove-key">Remove API key</button>
-          </div>
-          <p id="key-state" class="key-state">No key saved.</p>
-          <p id="notice" class="notice" hidden></p>
-          <p id="usage" class="usage" hidden></p>
-          <fieldset class="speech-settings">
-            <legend>Speech</legend>
-            <label><input type="checkbox" id="tts-enabled" checked /> Allow Speak aloud</label>
-            <label><input type="checkbox" id="tts-autoread" /> Auto-read replies (default off)</label>
-            <label class="stack" for="tts-rate">Speech rate</label>
-            <input id="tts-rate" type="range" min="0.75" max="1.25" step="0.05" value="1" />
-            <p id="tts-voice-line" class="key-state">Voice: checking the voices installed on this PC.</p>
-          </fieldset>
-        </div>
-      </details>
       <div class="log-wrap">
         <div id="thread" class="thread">
-          <p id="empty" class="empty">Say hello. Replies are a fixed demonstration, not a connected assistant.</p>
+          <p id="empty" class="empty">Say hello.</p>
           <ol id="log" class="history" role="log" aria-label="Conversation"></ol>
         </div>
         <button type="button" id="jump" class="jump" hidden>New reply</button>
       </div>
       <div class="dock">
-        <p id="disclosure" class="disclosure" hidden>
-          Qwen sends this conversation to Alibaba Model Studio in Singapore. It stays in memory on this PC and is not written to disk.
-        </p>
+        <p id="notice" class="notice" hidden></p>
         <p id="speech-error" class="speech-error" role="alert" hidden></p>
+        <p id="tts-error" class="speech-error" role="alert" hidden></p>
+        <div id="conversation-live" class="conversation-live" hidden>
+          <span>Conversation active</span>
+          <button type="button" id="stop-conversation" class="stop-conversation">Stop</button>
+        </div>
+        <p id="voice-phase" class="voice-phase" hidden></p>
         <div id="speech-controls" class="speech-controls" hidden>
           <p id="speech-state" role="status" aria-live="polite"></p>
-          <button type="button" id="speech-stop">Stop recording</button>
+          <button type="button" id="speech-stop">Stop</button>
           <button type="button" id="speech-cancel">Cancel</button>
         </div>
         <div id="speech-staged" class="speech-staged" hidden>
@@ -78,7 +49,6 @@
           <button type="button" id="speech-insert">Append to draft</button>
           <button type="button" id="speech-discard">Discard transcript</button>
         </div>
-        <p id="tts-error" class="speech-error" role="alert" hidden></p>
         <div id="tts-bar" class="tts-bar" hidden>
           <p id="tts-status" role="status" aria-live="polite">Speaking…</p>
           <button type="button" id="tts-stop">Stop speech</button>
@@ -86,40 +56,87 @@
         <p id="thinking" class="thinking" hidden aria-live="polite">Thinking…</p>
         <form id="composer" class="composer">
           <label class="field" for="draft">Message</label>
-          <textarea id="draft" maxlength="500" rows="1" placeholder="Write a message"></textarea>
-          <label class="speech-lang" for="speech-lang">
+          <textarea id="draft" maxlength="500" rows="2" placeholder="Write a message" title="Enter sends. Shift+Enter adds a line. Esc stops a reply."></textarea>
+          <div class="actions">
+            <button type="button" id="mic" class="mic" aria-label="Tap to record" title="Click to start. Click again to transcribe. Nothing is sent until you press Send.">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0v-5a3 3 0 0 0-3-3Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 11.5a5 5 0 0 0 10 0M12 16.5V20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </button>
+            <button type="button" id="voice-mute" class="voice-mute" aria-label="Mute" title="Mute spoken replies">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 9.5h3L12 6v12l-4.5-3.5h-3v-5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path class="sound" d="M15.5 9.5a3.2 3.2 0 0 1 0 5M17.8 7.2a6.2 6.2 0 0 1 0 9.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </button>
+            <span class="actions-gap"></span>
+            <button type="button" id="stop" class="stop" hidden aria-label="Stop reply">Stop</button>
+            <button type="submit" id="send" class="send">Send</button>
+          </div>
+        </form>
+        <div id="settings" class="settings" hidden>
+          <p class="settings-title">Voice</p>
+          <label class="option" for="conversation-mode">
+            <input type="checkbox" id="conversation-mode" />
+            Conversation mode
+          </label>
+          <label class="option" for="auto-submit">
+            <input type="checkbox" id="auto-submit" />
+            Send turns automatically
+          </label>
+          <label class="option option-select" for="speech-lang">
+            Language
             <select id="speech-lang" aria-label="Speech language">
               <option value="auto" selected>Auto</option>
-              <option value="es">ES</option>
-              <option value="en">EN</option>
+              <option value="es">Spanish</option>
+              <option value="en">English</option>
             </select>
           </label>
-          <button type="button" id="mic" class="mic" aria-label="Hold to record" title="Hold to talk. Release to transcribe.">Hold</button>
-          <button type="button" id="stop" class="stop" hidden aria-label="Stop reply">Stop</button>
-          <button type="submit" id="send" class="send">Send</button>
-        </form>
-        <div class="toolbar">
-          <p id="hint" class="hint">Enter sends. Shift+Enter adds a line. Esc stops a reply.</p>
-          <div class="toolbar-actions">
-            <button type="button" id="voice-mute" class="voice-mute">Mute</button>
-            <label class="voice-mode" for="conversation-mode">
-              <input type="checkbox" id="conversation-mode" />
-              Conversation
-            </label>
-            <details class="more">
-              <summary>More</summary>
-              <div class="more-menu">
-                <button type="button" id="clear">Clear conversation</button>
+          <label class="option" for="hold-to-talk">
+            <input type="checkbox" id="hold-to-talk" />
+            Hold to talk
+          </label>
+          <p class="settings-note">Click the microphone to record, then click again. Hold to talk uses a press and release instead. Enter sends. Nothing is sent until you press Send, unless automatic sending is on for this chat.</p>
+          <fieldset class="speech-settings">
+            <legend>Spoken replies</legend>
+            <label class="option"><input type="checkbox" id="tts-enabled" checked /> Allow spoken replies</label>
+            <label class="option"><input type="checkbox" id="tts-autoread" /> Read typed replies aloud</label>
+            <label class="option option-select" for="tts-rate">Speech rate</label>
+            <input id="tts-rate" type="range" min="0.75" max="1.25" step="0.05" value="1" />
+            <p id="tts-voice-line" class="key-state">Voice: checking the voices installed on this PC.</p>
+          </fieldset>
+          <details id="connection" class="connection">
+            <summary>Connection</summary>
+            <div class="connection-body">
+              <p id="preflight" class="preflight" hidden>
+                Stop-on-Exhaust is a switch in the Alibaba console for qwen3.7-plus. This app cannot see that switch.
+                Confirm it is still on before you send. A previous check showed 1,000,000 free tokens expiring 2027-01-21.
+                This app does not know whether that quota is still available, and it will not switch models or retry a failed call.
+              </p>
+              <fieldset class="provider-choice">
+                <legend>Provider</legend>
+                <label><input type="radio" name="provider" value="demo" checked /> Demo</label>
+                <label><input type="radio" name="provider" value="qwen" /> Qwen</label>
+              </fieldset>
+              <p class="model-name">Model <strong>qwen3.7-plus</strong></p>
+              <label class="stack" for="endpoint">Singapore endpoint</label>
+              <input id="endpoint" type="url" autocomplete="off" spellcheck="false" placeholder="https://workspace.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1" />
+              <button type="button" id="save-endpoint">Save endpoint</button>
+              <label class="stack" for="api-key">API key</label>
+              <input id="api-key" type="password" autocomplete="off" spellcheck="false" />
+              <div class="key-actions">
+                <button type="button" id="save-key">Save key</button>
+                <button type="button" id="remove-key">Remove API key</button>
               </div>
-            </details>
-          </div>
+              <p id="key-state" class="key-state">No key saved.</p>
+              <p id="usage" class="usage" hidden></p>
+            </div>
+          </details>
+          <p id="disclosure" class="disclosure" hidden>
+            Qwen sends this conversation to Alibaba Model Studio in Singapore. It stays in memory on this PC and is not written to disk.
+          </p>
+          <button type="button" id="clear" class="clear">Clear conversation</button>
         </div>
-        <p id="voice-phase" class="voice-phase" hidden>Conversation ready</p>
-        <details id="developer" class="developer" hidden>
-          <summary>Developer Tools</summary>
-          <div id="dev-panel" class="dev-panel"></div>
-        </details>
       </div>
+      <details id="developer" class="developer" hidden>
+        <summary>Developer Tools</summary>
+        <div id="dev-panel" class="dev-panel"></div>
+      </details>
       <div id="live" class="sr-only" aria-live="polite"></div>
     </section>
     <script type="module" src="./chat.ts"></script>

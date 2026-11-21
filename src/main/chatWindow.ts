@@ -72,6 +72,7 @@ export async function createChatController(options: {
   let shownPresence = '';
   let shownReason: PresenceReason | '' = '';
   let captureBusy = false;
+  let conversationHold = false;
   const liveCapture = (): boolean => ttsSpeaking || voicePose === 'ATTENTIVE' || voicePose === 'THINKING';
   const publishOverlayPresence = (): void => {
     const current = session.status();
@@ -258,6 +259,18 @@ export async function createChatController(options: {
     console.log('desktop-companion: conversation-reset');
   };
 
+  const onConversation = (event: IpcMainEvent, payload: unknown): void => {
+    if (!speechFrame(event) || typeof payload !== 'boolean' || payload === conversationHold) {
+      return;
+    }
+    conversationHold = payload;
+    if (payload) {
+      markIntentional();
+      return;
+    }
+    options.onQuiet?.();
+  };
+
   const onTyping = (event: IpcMainEvent): void => {
     if (!isChatFrame(event, options.dev)) {
       return;
@@ -384,6 +397,7 @@ export async function createChatController(options: {
   ipcMain.on(IpcChannels.chatClose, onClose);
   ipcMain.on(IpcChannels.chatMinimize, onMinimize);
   ipcMain.on(IpcChannels.chatActivity, onTyping);
+  ipcMain.on(IpcChannels.chatConversation, onConversation);
   ipcMain.handle(IpcChannels.speechArm, onSpeechArm);
   ipcMain.on(IpcChannels.speechDisarm, onSpeechDisarm);
   ipcMain.handle(IpcChannels.speechTranscribe, onSpeechTranscribe);
@@ -403,6 +417,7 @@ export async function createChatController(options: {
     stopVoice(): void {
       speech.cancel();
       captureBusy = false;
+      conversationHold = false;
       ttsSpeaking = false;
       voicePose = null;
       if (win && !win.isDestroyed()) {
@@ -417,7 +432,7 @@ export async function createChatController(options: {
         open: Boolean(win && !win.isDestroyed() && win.isVisible()),
         busy: session.status().busy,
         speaking: ttsSpeaking,
-        listening: captureBusy,
+        listening: captureBusy || conversationHold,
       };
     },
     async destroy() {
@@ -433,6 +448,7 @@ export async function createChatController(options: {
       voicePose = null;
       previewPose = null;
       captureBusy = false;
+      conversationHold = false;
       publishOverlayPresence();
       await speech.waitForIdle();
       session.stop();
@@ -449,6 +465,7 @@ export async function createChatController(options: {
       ipcMain.removeListener(IpcChannels.chatClose, onClose);
       ipcMain.removeListener(IpcChannels.chatMinimize, onMinimize);
       ipcMain.removeListener(IpcChannels.chatActivity, onTyping);
+      ipcMain.removeListener(IpcChannels.chatConversation, onConversation);
       ipcMain.removeHandler(IpcChannels.speechArm);
       ipcMain.removeListener(IpcChannels.speechDisarm, onSpeechDisarm);
       ipcMain.removeHandler(IpcChannels.speechTranscribe);
@@ -497,6 +514,7 @@ export async function createChatController(options: {
     voicePose = null;
     previewPose = null;
     captureBusy = false;
+    conversationHold = false;
     options.onEyePreview('CLEAR');
     publishOverlayPresence();
     win.hide();

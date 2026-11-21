@@ -60,3 +60,46 @@ export function validSpeechWav(value: unknown): value is Uint8Array {
 export function transcriptPlacement(before: string, now: string): 'insert' | 'stage' {
   return before === '' && now === before ? 'insert' : 'stage';
 }
+
+/** Quiet stretch that ends one utterance. Whisper stays idle until then. */
+export const ENDPOINT_SILENCE_MS = 900;
+/** Ignore a short noise spike before treating the microphone as speech. */
+export const ENDPOINT_MIN_SPEECH_MS = 280;
+const ENDPOINT_START_RMS = 0.02;
+const ENDPOINT_CONTINUE_RMS = 0.012;
+
+export function speechRms(samples: ArrayLike<number>): number {
+  if (samples.length === 0) {
+    return 0;
+  }
+  let sum = 0;
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = samples[index] ?? 0;
+    sum += sample * sample;
+  }
+  return Math.sqrt(sum / samples.length);
+}
+
+export interface SpeechEndpoint {
+  heardMs: number;
+  silenceMs: number;
+}
+
+/** Lightweight level gate. It does not transcribe and it does not keep audio. */
+export function noteSpeechEndpoint(
+  state: SpeechEndpoint,
+  level: number,
+  frameMs: number,
+): SpeechEndpoint & { ended: boolean } {
+  const duration = Number.isFinite(frameMs) && frameMs > 0 ? frameMs : 0;
+  const loud = Number.isFinite(level) ? level : 0;
+  const voiced = state.heardMs > 0 ? loud >= ENDPOINT_CONTINUE_RMS : loud >= ENDPOINT_START_RMS;
+  if (voiced) {
+    return { heardMs: state.heardMs + duration, silenceMs: 0, ended: false };
+  }
+  if (state.heardMs < ENDPOINT_MIN_SPEECH_MS) {
+    return { heardMs: 0, silenceMs: 0, ended: false };
+  }
+  const silenceMs = state.silenceMs + duration;
+  return { heardMs: state.heardMs, silenceMs, ended: silenceMs >= ENDPOINT_SILENCE_MS };
+}

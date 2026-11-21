@@ -98,6 +98,31 @@ test('cancel and chat closure discard capture and ignore a late transcript', asy
   assert.ok(h.counts().cancelled > 0);
 });
 
+function deliverLevel(processor: { onaudioprocess: null | ((event: unknown) => void) }, level: number): void {
+  processor.onaudioprocess?.({
+    inputBuffer: { getChannelData: () => new Float32Array(2048).fill(level) },
+    outputBuffer: { getChannelData: () => new Float32Array(2048) },
+  });
+}
+
+test('silence after detected speech transcribes once and closes the microphone', async () => {
+  const h = harness();
+  h.capture.setSilenceDetection(true);
+  await h.capture.start();
+  for (let i = 0; i < 12; i += 1) deliverLevel(h.processor, 0);
+  assert.equal(h.capture.currentState, 'recording');
+  deliverLevel(h.processor, 0.2);
+  for (let i = 0; i < 10; i += 1) deliverLevel(h.processor, 0);
+  assert.equal(h.capture.currentState, 'recording');
+  for (let i = 0; i < 3; i += 1) deliverLevel(h.processor, 0.2);
+  for (let i = 0; i < 8; i += 1) deliverLevel(h.processor, 0);
+  for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  assert.deepEqual(h.transcripts, ['Hola mundo']);
+  assert.equal(h.capture.currentState, 'idle');
+  assert.equal(h.counts().mediaCalls, 1);
+  assert.equal(h.counts().stopped, 1);
+});
+
 test('20 second sample cap cancels the microphone', async () => {
   const h = harness();
   await h.capture.start();

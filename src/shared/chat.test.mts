@@ -197,7 +197,7 @@ test('chat close hides the chat window and quit destroys both windows', () => {
   assert.match(main, /overlay\?\.destroy\(\)/);
   assert.match(main, /onOpenChat:/);
   assert.match(preload, /ipcRenderer\.invoke\(SPEECH_ARM\)/);
-  assert.match(preload, /ipcRenderer\.invoke\(SPEECH_TRANSCRIBE, wav\)/);
+  assert.match(preload, /ipcRenderer\.invoke\(SPEECH_TRANSCRIBE, wav, chosen\)/);
   assert.equal(preload.includes('setIgnoreMouseEvents'), false);
   assert.equal(preload.includes('exposeInMainWorld(\'electron\''), false);
   assert.equal(page.includes('innerHTML'), false);

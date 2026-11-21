@@ -7,8 +7,10 @@ import { transcriptPlacement } from '../shared/speechAudio.ts';
 import {
   classifyVoiceError,
   createVoiceSession,
+  shouldAutoSubmitTurn,
+  shouldResumeListening,
   shouldSpeakCompletedReply,
-  voicePhaseLabel,
+  visibleVoiceState,
 } from '../shared/voiceSession.ts';
 import { createChromiumTtsProvider } from './chromiumTtsProvider.ts';
 import { SpeechCapture } from './speechCapture.ts';
@@ -62,6 +64,12 @@ const ttsAutoRead = document.querySelector<HTMLInputElement>('#tts-autoread');
 const ttsRate = document.querySelector<HTMLInputElement>('#tts-rate');
 const ttsVoiceLine = document.querySelector<HTMLElement>('#tts-voice-line');
 const conversationMode = document.querySelector<HTMLInputElement>('#conversation-mode');
+const autoSubmit = document.querySelector<HTMLInputElement>('#auto-submit');
+const stopConversation = document.querySelector<HTMLButtonElement>('#stop-conversation');
+const conversationLive = document.querySelector<HTMLElement>('#conversation-live');
+const holdToTalk = document.querySelector<HTMLInputElement>('#hold-to-talk');
+const settingsToggle = document.querySelector<HTMLButtonElement>('#settings-toggle');
+const settingsPanel = document.querySelector<HTMLElement>('#settings');
 const speechLang = document.querySelector<HTMLSelectElement>('#speech-lang');
 const voiceMute = document.querySelector<HTMLButtonElement>('#voice-mute');
 const voicePhase = document.querySelector<HTMLElement>('#voice-phase');
@@ -100,7 +108,8 @@ if (
   !mic || !speechControls || !speechState || !speechStop || !speechCancel ||
   !speechStaged || !speechText || !speechInsert || !speechDiscard || !speechError ||
   !ttsBar || !ttsStatus || !ttsStop || !ttsError || !ttsEnabled || !ttsAutoRead || !ttsRate || !ttsVoiceLine ||
-  !conversationMode || !speechLang || !voiceMute || !voicePhase ||
+  !conversationMode || !autoSubmit || !stopConversation || !conversationLive || !holdToTalk ||
+  !settingsToggle || !settingsPanel || !speechLang || !voiceMute || !voicePhase ||
   !bridge
 ) {
   console.error('desktop-companion: chat page is incomplete');
@@ -120,6 +129,12 @@ if (
   const micButton = mic;
   const languageChoice = speechLang;
   const muteButton = voiceMute;
+  const autoSubmitBox = autoSubmit;
+  const stopConversationButton = stopConversation;
+  const conversationStrip = conversationLive;
+  const holdOption = holdToTalk;
+  const settingsButton = settingsToggle;
+  const settings = settingsPanel;
   const voiceControls = speechControls;
   const voiceState = speechState;
   const voiceStop = speechStop;
@@ -139,6 +154,12 @@ if (
   let capturePose: 'ATTENTIVE' | 'THINKING' | 'IDLE' | 'ERROR' | 'CLEAR' = 'CLEAR';
   let voiceReplyPending = false;
   let pointerHeld = false;
+  let micMode: 'tap' | 'hold' = 'tap';
+  let liveConversation = false;
+  let allowResume = false;
+  let permissionBlocked = false;
+  let awaitingConfirm = false;
+  let resumeTimer: ReturnType<typeof setTimeout> | null = null;
   const voice = createVoiceSession();
   const tts = createChromiumTtsProvider({
     onState() {
@@ -195,14 +216,62 @@ if (
     bridge.notifyVoicePresence(pose);
   };
   const renderVoice = (): void => {
-    const enabled = ttsSettings.conversation;
-    const label = voicePhaseLabel(voice.phase(), voice.errorKind(), enabled);
-    voicePhase.hidden = !enabled;
-    voicePhase.textContent = label;
+    const label = visibleVoiceState({
+      conversation: liveConversation,
+      phase: voice.phase(),
+      capture: speech.currentState,
+      speaking: tts.state() === 'speaking',
+      thinking: generating,
+    });
+    const captureVisible = speech.currentState !== 'idle';
+    voicePhase.hidden = label === '' || captureVisible;
+    voicePhase.textContent = label === 'Listening' || label === 'Transcribing' ? `${label}...` : label;
+    voicePhase.dataset.state = label.toLowerCase();
+    micButton.dataset.state = label.toLowerCase();
+    const recording = speech.currentState === 'recording';
+    micButton.setAttribute('aria-label', micMode === 'hold'
+      ? 'Hold to record'
+      : recording ? 'Stop recording' : 'Tap to record');
+    micButton.title = micMode === 'hold'
+      ? 'Hold to talk. Release to transcribe. Nothing is sent until you press Send.'
+      : 'Click to start. Click again to transcribe. Nothing is sent until you press Send.';
+    holdOption.checked = micMode === 'hold';
+    conversationStrip.hidden = !liveConversation;
+    stopConversationButton.hidden = !liveConversation;
+    const blockStart = generating || tts.state() === 'speaking' || speech.currentState === 'transcribing';
+    micButton.disabled = speech.currentState === 'transcribing'
+      || (blockStart && !recording && speech.currentState !== 'requesting')
+      || (micMode === 'hold' && (recording || speech.currentState === 'requesting'));
   };
-  const releaseVoice = (): void => {
-    voice.apply('close');
-    renderVoice();
+  const clearResume = (): void => {
+    if (resumeTimer) {
+      clearTimeout(resumeTimer);
+      resumeTimer = null;
+    }
+  };
+  const resumeListening = (): void => {
+    clearResume();
+    resumeTimer = setTimeout(() => {
+      resumeTimer = null;
+      const speaking = tts.state() === 'speaking';
+      const captureBusy = speech.currentState !== 'idle';
+      if (liveConversation && allowResume && !permissionBlocked && !awaitingConfirm && (speaking || captureBusy)) {
+        resumeListening();
+        return;
+      }
+      if (!shouldResumeListening({
+        conversation: liveConversation,
+        allowResume,
+        permissionDenied: permissionBlocked,
+        speaking,
+        captureBusy,
+        awaitingSend: awaitingConfirm,
+      })) {
+        renderVoice();
+        return;
+      }
+      beginRecording();
+    }, 600);
   };
   const maybeSpeakArmed = (): void => {
     const last = shown[shown.length - 1];
@@ -232,13 +301,17 @@ if (
         voice.apply('done');
       }
       renderVoice();
+      if (liveConversation) {
+        resumeListening();
+      }
     });
   };
   const refreshTtsUi = (): void => {
     const speaking = tts.state() === 'speaking';
     ttsBar.hidden = !speaking;
     ttsStatus.textContent = speaking ? 'Speaking' : '';
-    muteButton.textContent = ttsSettings.enabled ? 'Mute' : 'Unmute';
+    muteButton.setAttribute('aria-label', ttsSettings.enabled ? 'Mute' : 'Unmute');
+    muteButton.dataset.muted = ttsSettings.enabled ? '0' : '1';
     muteButton.setAttribute('aria-pressed', ttsSettings.enabled ? 'false' : 'true');
     for (const button of history.querySelectorAll<HTMLButtonElement>('.speak-reply')) {
       button.disabled = !ttsSettings.enabled || speaking || speech.currentState !== 'idle' || pabloReady === false;
@@ -249,10 +322,17 @@ if (
     voiceError.textContent = message;
     voiceError.hidden = false;
     noteCapture('ERROR');
-    if (ttsSettings.conversation) {
-      voice.apply('fail', classifyVoiceError(message));
-      renderVoice();
+    const kind = classifyVoiceError(message);
+    if (kind === 'denied') {
+      permissionBlocked = true;
+      allowResume = false;
+      clearResume();
     }
+    if (liveConversation || ttsSettings.conversation) {
+      voice.apply('fail', kind);
+    }
+    awaitingConfirm = liveConversation;
+    renderVoice();
   };
   const clearSpeechError = (): void => {
     voiceError.textContent = '';
@@ -263,12 +343,11 @@ if (
     voiceControls.dataset.state = state;
     voiceStop.hidden = state !== 'recording';
     voiceState.textContent = state === 'recording'
-      ? `● Recording locally · ${seconds.toFixed(1)} / 20 s`
-      : state === 'requesting' ? 'Requesting microphone access…'
-        : state === 'transcribing' ? 'Transcribing locally…' : '';
-    micButton.disabled = state !== 'idle' || generating || tts.state() === 'speaking';
+      ? `Listening... ${Math.ceil(seconds)}s`
+      : state === 'requesting' ? 'Listening...'
+        : state === 'transcribing' ? 'Transcribing...' : '';
     micButton.dataset.live = state === 'recording' ? '1' : '0';
-    if (state === 'recording' && !pointerHeld) {
+    if (micMode === 'hold' && !liveConversation && state === 'recording' && !pointerHeld) {
       void speech.stop();
     }
     if (state === 'requesting' || state === 'recording') {
@@ -278,7 +357,7 @@ if (
     } else if (capturePose === 'ATTENTIVE' || capturePose === 'THINKING') {
       noteCapture('CLEAR');
     }
-    if (ttsSettings.conversation) {
+    if (liveConversation || ttsSettings.conversation) {
       if (state === 'requesting' || state === 'recording') {
         voice.apply('mic');
       } else if (state === 'transcribing') {
@@ -289,9 +368,36 @@ if (
           voice.apply('released');
         }
       }
-      renderVoice();
     }
+    renderVoice();
     refreshTtsUi();
+  };
+  const offerTranscript = (text: string): void => {
+    const placement = transcriptPlacement(draftBeforeRecording, composer.value);
+    if (placement === 'insert') {
+      composer.value = text;
+      voiceReplyPending = true;
+    } else {
+      pendingTranscript = text;
+      voiceText.textContent = text;
+      voiceStaged.hidden = false;
+    }
+    if (liveConversation) {
+      voice.apply('transcript');
+    }
+    const sendNow = shouldAutoSubmitTurn({
+      conversation: liveConversation,
+      autoSubmit: autoSubmitBox.checked,
+      placement,
+    });
+    awaitingConfirm = liveConversation && !sendNow;
+    renderVoice();
+    refreshSend();
+    if (sendNow) {
+      form.requestSubmit();
+      return;
+    }
+    composer.focus();
   };
   speech = new SpeechCapture(bridge, refreshSpeech, (text) => {
     noteCapture('IDLE');
@@ -299,24 +405,7 @@ if (
       showSpeechError('Transcript is too long for one message.');
       return;
     }
-    if (transcriptPlacement(draftBeforeRecording, composer.value) === 'insert') {
-      composer.value = text;
-      voiceReplyPending = true;
-      if (ttsSettings.conversation) {
-        voice.apply('transcript');
-        renderVoice();
-      }
-      refreshSend();
-      composer.focus();
-      return;
-    }
-    pendingTranscript = text;
-    voiceText.textContent = text;
-    voiceStaged.hidden = false;
-    if (ttsSettings.conversation) {
-      voice.apply('transcript');
-      renderVoice();
-    }
+    offerTranscript(text);
   }, showSpeechError);
 
   composer.maxLength = MAX_CHAT_CHARS;
@@ -329,7 +418,7 @@ if (
       draftValid: validateChatText(composer.value).ok,
     });
     send.disabled = reason !== null;
-    micButton.disabled = generating || speech.currentState !== 'idle' || tts.state() === 'speaking';
+    renderVoice();
     const label = reason ?? 'ready';
     if (label !== lastSendReason) {
       lastSendReason = label;
@@ -472,6 +561,10 @@ if (
     }
   };
 
+  thread.addEventListener('click', (event) => {
+    if (event.target instanceof Element && event.target.closest('.speak-reply')) return;
+    setSettingsOpen(false);
+  });
   thread.addEventListener('scroll', () => {
     const distance = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
     stickToBottom = shouldFollowTranscript(distance);
@@ -482,24 +575,20 @@ if (
 
   follow.addEventListener('click', scrollToEnd);
   closeButton.addEventListener('click', () => {
-    speech.cancel();
-    tts.stop();
-    releaseVoice();
+    endConversation();
     bridge.closeChat();
   });
   minimizeButton.addEventListener('click', () => {
-    speech.cancel();
-    tts.stop();
-    releaseVoice();
+    endConversation();
     bridge.minimizeChat();
   });
-  const beginHold = (): void => {
-    if (pointerHeld || generating || speech.currentState !== 'idle' || tts.state() === 'speaking') return;
+  const beginRecording = (): void => {
+    if (generating || speech.currentState !== 'idle' || tts.state() === 'speaking') return;
     if (pendingTranscript) {
       showSpeechError('Insert or discard the previous transcript first.');
       return;
     }
-    pointerHeld = true;
+    clearResume();
     if (voice.phase() === 'SPEAKING') {
       voice.apply('cancel');
       voice.apply('released');
@@ -507,10 +596,36 @@ if (
     tts.stop();
     clearSpeechError();
     speech.setLanguage(speechLanguage(languageChoice.value));
+    speech.setSilenceDetection(liveConversation);
     draftBeforeRecording = composer.value;
     void speech.start();
   };
+  const endConversation = (): void => {
+    liveConversation = false;
+    allowResume = false;
+    awaitingConfirm = false;
+    permissionBlocked = false;
+    clearResume();
+    ttsSettings = { ...ttsSettings, conversation: false };
+    conversationMode.checked = false;
+    speech.cancel();
+    tts.stop();
+    voice.apply('close');
+    noteCapture('CLEAR');
+    bridge.notifyConversation(false);
+    renderVoice();
+  };
+  const beginHold = (): void => {
+    if (micMode !== 'hold' || pointerHeld || generating || speech.currentState !== 'idle' || tts.state() === 'speaking') return;
+    if (pendingTranscript) {
+      showSpeechError('Insert or discard the previous transcript first.');
+      return;
+    }
+    pointerHeld = true;
+    beginRecording();
+  };
   const endHold = (): void => {
+    if (micMode !== 'hold') return;
     if (!pointerHeld && speech.currentState !== 'recording') return;
     pointerHeld = false;
     if (speech.currentState === 'recording') {
@@ -521,25 +636,55 @@ if (
       speech.cancel();
     }
   };
+  const onTap = (): void => {
+    if (micMode !== 'tap') return;
+    if (speech.currentState === 'recording') {
+      void speech.stop();
+      return;
+    }
+    if (speech.currentState === 'requesting') {
+      speech.cancel();
+      return;
+    }
+    allowResume = true;
+    permissionBlocked = false;
+    beginRecording();
+  };
+  holdOption.addEventListener('change', () => {
+    if (speech.currentState === 'recording' || speech.currentState === 'requesting') speech.cancel();
+    micMode = holdOption.checked ? 'hold' : 'tap';
+    pointerHeld = false;
+    speech.setSilenceDetection(liveConversation && micMode !== 'hold');
+    renderVoice();
+  });
+  const setSettingsOpen = (open: boolean): void => {
+    settings.hidden = !open;
+    settingsButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  settingsButton.addEventListener('click', () => {
+    setSettingsOpen(settings.hasAttribute('hidden'));
+  });
   micButton.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
+    if (micMode !== 'hold' || event.button !== 0) return;
     event.preventDefault();
     micButton.setPointerCapture(event.pointerId);
     beginHold();
   });
   micButton.addEventListener('pointerup', endHold);
   micButton.addEventListener('pointercancel', endHold);
+  micButton.addEventListener('click', () => {
+    onTap();
+  });
   micButton.addEventListener('keydown', (event) => {
-    if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
-      event.preventDefault();
-      beginHold();
-    }
+    if (event.repeat || (event.key !== ' ' && event.key !== 'Enter')) return;
+    event.preventDefault();
+    if (micMode === 'tap') onTap();
+    else beginHold();
   });
   micButton.addEventListener('keyup', (event) => {
-    if (event.key === ' ' || event.key === 'Enter') {
-      event.preventDefault();
-      endHold();
-    }
+    if (micMode !== 'hold' || (event.key !== ' ' && event.key !== 'Enter')) return;
+    event.preventDefault();
+    endHold();
   });
   voiceStop.addEventListener('click', () => { void speech.stop(); });
   voiceCancel.addEventListener('click', () => {
@@ -565,38 +710,60 @@ if (
     pendingTranscript = '';
     voiceText.textContent = '';
     voiceStaged.hidden = true;
+    awaitingConfirm = false;
+    if (liveConversation) {
+      allowResume = true;
+      resumeListening();
+    }
   });
   bridge.onSpeechForceStop(() => {
-    speech.cancel();
-    tts.stop();
-    releaseVoice();
+    endConversation();
   });
   bridge.onTtsForceStop(() => {
+    allowResume = false;
+    clearResume();
     tts.stop();
     if (voice.phase() === 'SPEAKING') {
       voice.apply('cancel');
       voice.apply('released');
-      renderVoice();
     }
+    renderVoice();
   });
   window.addEventListener('pagehide', () => {
-    speech.cancel();
+    endConversation();
     tts.dispose();
-    releaseVoice();
   });
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && speech.currentState !== 'idle') speech.cancel();
+    if (!document.hidden || speech.currentState === 'idle') return;
+    allowResume = false;
+    clearResume();
+    speech.cancel();
   });
   window.addEventListener('blur', () => {
-    if (speech.currentState === 'recording') speech.cancel('Recording stopped when chat lost focus.');
+    if (speech.currentState !== 'recording') return;
+    allowResume = false;
+    clearResume();
+    speech.cancel('Recording stopped when chat lost focus.');
   });
   stop.addEventListener('click', () => {
-    if (ttsSettings.conversation && (voice.phase() === 'WAITING_FOR_AI' || voice.phase() === 'AI_RESPONDING')) {
+    allowResume = false;
+    clearResume();
+    if (speech.currentState !== 'idle') speech.cancel();
+    if (liveConversation && (voice.phase() === 'WAITING_FOR_AI' || voice.phase() === 'AI_RESPONDING' || voice.phase() === 'SPEAKING')) {
       voice.apply('cancel');
       voice.apply('released');
       renderVoice();
     }
     bridge.stopGeneration();
+  });
+  stopConversationButton.addEventListener('click', () => {
+    endConversation();
+  });
+  ttsStop.addEventListener('click', () => {
+    allowResume = false;
+    clearResume();
+    tts.stop();
+    renderVoice();
   });
 
   form.addEventListener('submit', (event) => {
@@ -605,7 +772,8 @@ if (
     if (generating || !validated.ok) {
       return;
     }
-    if (ttsSettings.enabled && (voiceReplyPending || ttsSettings.conversation)) {
+    awaitingConfirm = false;
+    if (ttsSettings.enabled && (voiceReplyPending || liveConversation)) {
       voice.arm();
       renderVoice();
     }
@@ -813,7 +981,6 @@ if (
   bridge.onFocusComposer(() => {
     composer.focus();
   });
-  ttsStop.addEventListener('click', () => tts.stop());
   history.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) {
@@ -832,17 +999,11 @@ if (
   });
 
   const applyTtsSettings = (next: TtsSettingsMessage): void => {
-    const wasConversation = ttsSettings.conversation;
-    ttsSettings = next;
+    ttsSettings = { ...next, conversation: liveConversation };
     ttsEnabled.checked = next.enabled;
     ttsAutoRead.checked = next.autoRead;
-    conversationMode.checked = next.conversation;
+    conversationMode.checked = liveConversation;
     ttsRate.value = String(next.rate);
-    if (wasConversation && !next.conversation) {
-      tts.stop();
-      speech.cancel();
-      voice.release();
-    }
     renderVoice();
     refreshTtsUi();
   };
@@ -856,7 +1017,20 @@ if (
     bridge.setTtsSettings({ autoRead: ttsAutoRead.checked });
   });
   conversationMode.addEventListener('change', () => {
-    bridge.setTtsSettings({ conversation: conversationMode.checked });
+    if (conversationMode.checked) {
+      liveConversation = true;
+      allowResume = true;
+      permissionBlocked = false;
+      awaitingConfirm = false;
+      ttsSettings = { ...ttsSettings, conversation: true };
+      bridge.notifyConversation(true);
+      clearSpeechError();
+      setSettingsOpen(false);
+      beginRecording();
+      renderVoice();
+      return;
+    }
+    if (liveConversation) endConversation();
   });
   ttsRate.addEventListener('change', () => {
     bridge.setTtsSettings({ rate: Number(ttsRate.value) });
@@ -945,8 +1119,8 @@ function applyStatus(
   if (empty && empty.hidden === false) {
     empty.textContent =
       next.provider === 'qwen'
-        ? 'Say hello. Replies come from qwen3.7-plus after the Singapore endpoint and API key are saved.'
-        : 'Say hello. Replies are a fixed demonstration, not a connected assistant.';
+        ? 'Say hello. Save the Qwen endpoint and key in Settings.'
+        : 'Say hello.';
   }
   if (next.usage) {
     view.usageLine.hidden = false;
