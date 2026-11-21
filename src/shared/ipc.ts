@@ -169,7 +169,7 @@ export interface ChatBridge {
   onStatus: (listener: (status: ChatStatusMessage) => void) => () => void;
   armMicrophone: () => Promise<boolean>;
   disarmMicrophone: () => void;
-  transcribeAudio: (wav: Uint8Array) => Promise<{ text?: string; error?: string }>;
+  transcribeAudio: (wav: Uint8Array, language?: 'es' | 'en' | 'auto') => Promise<{ text?: string; error?: string }>;
   cancelTranscription: () => void;
   onSpeechForceStop: (listener: () => void) => () => void;
   onTtsForceStop: (listener: () => void) => () => void;

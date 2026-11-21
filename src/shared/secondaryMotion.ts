@@ -222,7 +222,7 @@ function hold(out: SecondaryPose, cue: string, now: number): void {
     return;
   }
   if (cue === 'LISTENING') {
-    out.antennaSway = 0.24;
+    out.antennaSway = 0.24 + Math.sin(now / 900) * 0.03;
     out.leftArmLift = 0.28;
     out.rightArmLift = 0.28;
     out.ambientMix = 0;
@@ -243,7 +243,10 @@ function hold(out: SecondaryPose, cue: string, now: number): void {
     return;
   }
   if (cue === 'SPEAKING') {
-    out.antennaSway = 0.16;
+    const beat = Math.sin(now / 420);
+    out.antennaSway = 0.2 + beat * 0.04;
+    out.leftArmLift = 0.05 + Math.abs(beat) * 0.04;
+    out.rightArmLift = out.leftArmLift;
     out.breathingScale = slowBreath(now, 2_400, 0.004);
     out.ambientMix = 0;
   }

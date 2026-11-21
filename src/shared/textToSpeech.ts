@@ -21,7 +21,7 @@ export interface TtsVoiceDescriptor {
 
 export interface TextToSpeechProvider {
   state(): TtsPlaybackState;
-  speak(text: string, options: { rate: number; signal: AbortSignal }): Promise<'done' | 'cancelled' | 'failed'>;
+  speak(text: string, options: { rate: number; signal: AbortSignal; lang?: 'es' | 'en' }): Promise<'done' | 'cancelled' | 'failed'>;
   stop(): void;
   dispose(): void;
 }
@@ -65,6 +65,52 @@ export function isPabloVoice(
 export function pickPabloVoice(voices: readonly TtsVoiceDescriptor[]): TtsVoiceDescriptor | null {
   const matches = voices.filter((voice) => isPabloVoice(voice));
   return matches.find((voice) => voice.name === PABLO_VOICE_NAME) ?? matches[0] ?? null;
+}
+
+export type SpeechLanguage = 'es' | 'en' | 'auto';
+
+export function speechLanguage(value: unknown): SpeechLanguage {
+  return value === 'en' || value === 'es' || value === 'auto' ? value : 'es';
+}
+
+const SPANISH_WORDS = new Set(['el', 'la', 'los', 'las', 'de', 'que', 'y', 'en', 'un', 'una', 'hola', 'gracias', 'por', 'para', 'con', 'es', 'está', 'como', 'qué', 'dónde']);
+const ENGLISH_WORDS = new Set(['the', 'a', 'an', 'is', 'are', 'and', 'to', 'of', 'hello', 'thanks', 'please', 'what', 'how', 'you', 'i', 'where', 'can']);
+
+/** A short guess used only to choose a local voice. A tie keeps the fallback. */
+export function guessSpeechLang(text: string, fallback: 'es' | 'en' = 'es'): 'es' | 'en' {
+  const words = text.toLowerCase().match(/[a-záéíóúüñ]+/g) ?? [];
+  let spanish = 0;
+  let english = 0;
+  for (const word of words) {
+    if (SPANISH_WORDS.has(word)) spanish += 1;
+    if (ENGLISH_WORDS.has(word)) english += 1;
+  }
+  if (/[áéíóúñ¿¡]/i.test(text)) spanish += 2;
+  if (spanish > english) return 'es';
+  if (english > spanish) return 'en';
+  return fallback;
+}
+
+function localVoices(voices: readonly TtsVoiceDescriptor[]): TtsVoiceDescriptor[] {
+  return voices.filter((voice) => voice.localService !== false);
+}
+
+/**
+ * A voice installed on this PC. Spanish prefers Pablo, then Helena.
+ * English prefers Zira, then David or Mark. Cloud voices are ignored.
+ */
+export function pickSpokenVoice(voices: readonly TtsVoiceDescriptor[], language: 'es' | 'en'): TtsVoiceDescriptor | null {
+  const local = localVoices(voices);
+  if (language === 'es') {
+    return pickPabloVoice(local)
+      ?? local.find((voice) => /helena/i.test(voice.name) && normalizeLang(voice.lang).startsWith('es'))
+      ?? local.find((voice) => normalizeLang(voice.lang).startsWith('es'))
+      ?? null;
+  }
+  return local.find((voice) => /zira/i.test(voice.name) && normalizeLang(voice.lang).startsWith('en'))
+    ?? local.find((voice) => /\b(?:david|mark)\b/i.test(voice.name) && normalizeLang(voice.lang).startsWith('en'))
+    ?? local.find((voice) => normalizeLang(voice.lang).startsWith('en'))
+    ?? null;
 }
 
 export function sanitizeSpeechText(raw: string): string {

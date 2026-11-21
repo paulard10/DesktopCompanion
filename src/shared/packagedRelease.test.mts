@@ -10,6 +10,7 @@ import {
   companionPreload,
   companionRendererRoot,
   companionSpeechRoot,
+  speechAssetRoot,
   companionTrailPreload,
   resolveTrayIcon,
 } from './packagedLayout.ts';
@@ -32,6 +33,24 @@ test('packaged paths stay beside the compiled main file and outside the archive 
   assert.equal(resolveTrayIcon(packed, () => false), path.join('C:', 'Program', 'resources', 'app.asar', 'assets', 'tray.png'));
   assert.equal(companionSpeechRoot(path.join('C:', 'Program', 'resources')), path.join('C:', 'Program', 'resources', 'speech'));
   assert.equal(companionSpeechRoot(path.join('C:', 'Program', 'resources')).includes('.local-asr'), false);
+  const project = path.join('C:', 'source', 'DesktopCompanion');
+  assert.equal(speechAssetRoot({
+    packaged: false,
+    resourcesPath: path.join('C:', 'Program', 'resources'),
+    projectRoot: project,
+  }), path.join(project, '.local-asr'));
+  assert.equal(speechAssetRoot({
+    packaged: true,
+    resourcesPath: path.join('C:', 'Program', 'resources'),
+    projectRoot: project,
+    configuredPath: '   ',
+  }), path.join('C:', 'Program', 'resources', 'speech'));
+  assert.equal(speechAssetRoot({
+    packaged: false,
+    resourcesPath: path.join('C:', 'Program', 'resources'),
+    projectRoot: project,
+    configuredPath: path.join('D:', 'speech'),
+  }), path.join('D:', 'speech'));
 });
 
 test('the Windows package allowlist keeps secrets, Whisper, and research out of the app', () => {
@@ -112,9 +131,14 @@ test('the Windows package allowlist keeps secrets, Whisper, and research out of 
   assert.equal(overlay.includes('http://127.0.0.1:5173/') && overlay.includes('options.dev'), true);
   const chat = read('src/main/chatWindow.ts');
   assert.match(chat, /app:\/\/companion\/chat\.html/);
-  assert.match(chat, /process\.resourcesPath, 'speech'/);
-  assert.match(chat, /\.local-asr/);
+  assert.match(chat, /speechAssetRoot\(/);
+  assert.match(chat, /process\.resourcesPath/);
+  assert.match(chat, /DESKTOP_COMPANION_SPEECH_ROOT/);
   assert.match(chat, /app\.isPackaged/);
+  assert.equal(chat.includes('.local-asr'), false);
+  const layout = read('src/shared/packagedLayout.ts');
+  assert.match(layout, /\.local-asr/);
+  assert.match(layout, /resourcesPath, 'speech'/);
   assert.match(chat, /resolveTrayIcon\(__dirname\)/);
   const tray = read('src/main/tray.ts');
   assert.match(tray, /resolveTrayIcon\(__dirname\)/);

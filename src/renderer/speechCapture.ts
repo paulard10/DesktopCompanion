@@ -1,4 +1,5 @@
 import { MAX_RECORDING_SECONDS, SPEECH_RATE, pcmWav } from '../shared/speechAudio.ts';
+import { speechLanguage, type SpeechLanguage } from '../shared/textToSpeech.ts';
 import type { ChatBridge } from '../shared/ipc.ts';
 
 export type SpeechState = 'idle' | 'requesting' | 'recording' | 'transcribing';
@@ -24,6 +25,7 @@ export class SpeechCapture {
   private chunks: Float32Array[] = [];
   private samples = 0;
   private startedAt = 0;
+  private language: SpeechLanguage = 'auto';
 
   constructor(
     bridge: SpeechBridge,
@@ -42,6 +44,10 @@ export class SpeechCapture {
   }
 
   get currentState(): SpeechState { return this.state; }
+
+  setLanguage(language: SpeechLanguage): void {
+    this.language = speechLanguage(language);
+  }
 
   async start(): Promise<void> {
     if (this.state !== 'idle') return;
@@ -122,7 +128,7 @@ export class SpeechCapture {
     this.samples = 0;
     this.setState('transcribing');
     try {
-      const result = await this.bridge.transcribeAudio(wav);
+      const result = await this.bridge.transcribeAudio(wav, this.language);
       wav.fill(0);
       if (token !== this.generation) return;
       if (result.error) throw new Error(result.error);

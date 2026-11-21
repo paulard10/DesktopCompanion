@@ -74,6 +74,13 @@ export function applyPresence<T extends PresencePose>(
       eyeScale: 1.08,
     };
   }
+  if (presence === 'ATTENTIVE') {
+    return {
+      ...pose,
+      glow: clamp(pose.glow * 1.18, 0, 1.3),
+      antenna: pose.antenna - 0.1,
+    };
+  }
   if (presence === 'IDLE') {
     return pose;
   }

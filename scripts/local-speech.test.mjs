@@ -58,6 +58,21 @@ test('fixed Spanish CLI args, one process, private WAV cleanup and no shell', as
   assert.equal(existsSync(path.dirname(input)), false);
 });
 
+test('English and automatic language stay inside the fixed CLI allowlist', async () => {
+  const seen = [];
+  const speech = job(fakeProcess((child, _exe, args) => {
+    seen.push(args[5]);
+    setImmediate(() => {
+      child.stdout.write('[00:00:00.000 --> 00:00:00.100] Hello\n');
+      child.emit('close', 0);
+    });
+  }));
+  assert.equal(await speech.transcribe(wav, 'en'), 'Hello');
+  assert.equal(await speech.transcribe(wav, 'auto'), 'Hello');
+  assert.equal(await speech.transcribe(wav, 'fr'), 'Hello');
+  assert.deepEqual(seen, ['en', 'auto', 'es']);
+});
+
 test('failure and cancellation remove application-created audio', async () => {
   let input = '';
   const failed = job(fakeProcess((child, _exe, args) => {

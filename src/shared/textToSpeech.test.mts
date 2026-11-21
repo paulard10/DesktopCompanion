@@ -3,8 +3,11 @@ import test from 'node:test';
 import {
   PABLO_VOICE_NAME,
   clampSpeechRate,
+  guessSpeechLang,
   isPabloVoice,
   pickPabloVoice,
+  pickSpokenVoice,
+  speechLanguage,
   sanitizeSpeechText,
   splitSpeechText,
 } from './textToSpeech.ts';
@@ -25,6 +28,16 @@ test('pablo voice selection requires es-ES and the name Pablo', () => {
   ]);
   assert.equal(picked?.voiceURI, 'p');
   assert.equal(pickPabloVoice([]), null);
+  const helena = { name: 'Microsoft Helena Desktop', lang: 'es-ES', voiceURI: 'helena', localService: true };
+  const zira = { name: 'Microsoft Zira Desktop', lang: 'en-US', voiceURI: 'zira', localService: true };
+  const cloud = { name: 'Microsoft Zira Online', lang: 'en-US', voiceURI: 'cloud', localService: false };
+  assert.equal(pickSpokenVoice([helena, zira, cloud], 'es')?.voiceURI, 'helena');
+  assert.equal(pickSpokenVoice([helena, zira, cloud], 'en')?.voiceURI, 'zira');
+  assert.equal(pickSpokenVoice([cloud], 'en'), null);
+  assert.equal(guessSpeechLang('Hello, how are you?', 'es'), 'en');
+  assert.equal(guessSpeechLang('Hola, ¿cómo estás?', 'en'), 'es');
+  assert.equal(speechLanguage('auto'), 'auto');
+  assert.equal(speechLanguage('fr'), 'es');
 });
 
 test('speech text is bounded and split without overlap', () => {

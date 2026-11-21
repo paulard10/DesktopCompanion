@@ -5,6 +5,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { validSpeechWav } from '../shared/speechAudio.js';
+import { speechLanguage, type SpeechLanguage } from '../shared/textToSpeech.js';
 
 const ASSET_HASHES: Record<string, string> = {
   'bin/whisper-cli.exe': '95e3c0b0e778ad9499eb0125f97c1dcf437dd9eb4ea77050b043574f93c2631d',
@@ -38,7 +39,7 @@ function readAvailableMemory(sample: () => number): number | null {
 }
 
 export interface SpeechJob {
-  transcribe: (wav: Uint8Array) => Promise<string>;
+  transcribe: (wav: Uint8Array, language?: SpeechLanguage) => Promise<string>;
   cancel: () => void;
   waitForIdle: () => Promise<void>;
 }
@@ -64,7 +65,7 @@ export function createLocalSpeechJob(options: {
     async waitForIdle() {
       await active?.finished;
     },
-    async transcribe(wav) {
+    async transcribe(wav, language: SpeechLanguage = 'es') {
       if (active) throw new Error('A transcription is already running.');
       if (!validSpeechWav(wav)) throw new Error('Unsupported audio. Record up to 20 seconds.');
       const availableBytes = readAvailableMemory(options.availableMemoryBytes ?? os.freemem);
@@ -87,7 +88,7 @@ export function createLocalSpeechJob(options: {
         const executable = path.join(assetRoot, 'bin', 'whisper-cli.exe');
         const model = path.join(assetRoot, 'ggml-tiny.bin');
         const child = launch(executable,
-          ['-m', model, '-f', input, '-l', 'es', '-t', '2', '-ng', '-nt'],
+          ['-m', model, '-f', input, '-l', speechLanguage(language), '-t', '2', '-ng', '-nt'],
           { cwd: path.dirname(executable), shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
         job.child = child;
         if (job.cancelled) child.kill();

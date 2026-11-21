@@ -617,6 +617,7 @@ void app.whenReady().then(async () => {
     onSleep: () => {
       bedtime = false;
       clearQuietTimer();
+      chat?.stopVoice();
       selection?.cancel();
       const phase = overlay?.wanderView()?.travelPhase ?? 'idle';
       applyWander(endWanderSession(wander, phase));

@@ -1,7 +1,8 @@
 import {
   clampSpeechRate,
+  guessSpeechLang,
   isPabloVoice,
-  pickPabloVoice,
+  pickSpokenVoice,
   sanitizeSpeechText,
   splitSpeechText,
   type TextToSpeechProvider,
@@ -87,7 +88,7 @@ export function createChromiumTtsProvider(
       return;
     }
     const voices = readVoices();
-    const picked = pickPabloVoice(voices);
+    const picked = pickSpokenVoice(voices, 'es') ?? pickSpokenVoice(voices, 'en');
     const nextSignature = voices.map((voice) => `${voice.name}\t${voice.lang}\t${voice.voiceURI}\t${voice.localService}`).join('\n');
     const changed = nextSignature !== signature;
     signature = nextSignature;
@@ -244,7 +245,7 @@ export function createChromiumTtsProvider(
       notifyWaiters(null);
       waiters.clear();
     },
-    async speak(text: string, speakOptions: { rate: number; signal: AbortSignal }): Promise<TtsOutcome> {
+    async speak(text: string, speakOptions: { rate: number; signal: AbortSignal; lang?: 'es' | 'en' }): Promise<TtsOutcome> {
       if (disposed) {
         return 'cancelled';
       }
@@ -269,20 +270,24 @@ export function createChromiumTtsProvider(
           outcome = 'cancelled';
           return outcome;
         }
-        if (!voiceDesc) {
+        const lang = speakOptions.lang ?? guessSpeechLang(cleaned, 'es');
+        const described = pickSpokenVoice(readVoices(), lang)
+          ?? pickSpokenVoice(readVoices(), lang === 'es' ? 'en' : 'es')
+          ?? voiceDesc;
+        if (!described) {
           outcome = 'failed';
           return outcome;
         }
         const voices = synthesis.getVoices();
         const voice =
-          voices.find((entry) => entry.voiceURI === voiceDesc.voiceURI) ??
+          voices.find((entry) => entry.voiceURI === described.voiceURI) ??
           voices.find((entry) =>
             isPabloVoice({
               name: entry.name,
               lang: entry.lang,
               voiceURI: entry.voiceURI,
               localService: entry.localService,
-            }),
+            }) && lang === 'es',
           ) ??
           null;
         if (!voice) {

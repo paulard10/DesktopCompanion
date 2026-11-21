@@ -140,11 +140,12 @@ contextBridge.exposeInMainWorld('chat', {
   disarmMicrophone(): void {
     ipcRenderer.send(SPEECH_DISARM);
   },
-  async transcribeAudio(wav: Uint8Array): Promise<{ text?: string; error?: string }> {
+  async transcribeAudio(wav: Uint8Array, language?: 'es' | 'en' | 'auto'): Promise<{ text?: string; error?: string }> {
     if (!(wav instanceof Uint8Array) || wav.byteLength > 640_044 || wav.byteLength < 46) {
       return { error: 'Unsupported audio.' };
     }
-    return ipcRenderer.invoke(SPEECH_TRANSCRIBE, wav);
+    const chosen = language === 'en' || language === 'auto' ? language : 'es';
+    return ipcRenderer.invoke(SPEECH_TRANSCRIBE, wav, chosen);
   },
   cancelTranscription(): void {
     ipcRenderer.send(SPEECH_CANCEL);

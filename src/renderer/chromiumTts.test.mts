@@ -121,19 +121,27 @@ test('Pablo appears after an empty voiceschanged', async () => {
   provider.dispose();
 });
 
-test('Pablo unavailable and an empty list settle without speaking', async () => {
+test('a local Helena voice speaks when Pablo is absent, and a cloud-only list does not', async () => {
   let spoke = false;
   const helena = mockSynth({
     voices: () => [{ name: 'Microsoft Helena - Spanish (Spain)', lang: 'es-ES', voiceURI: 'h', localService: true }] as unknown as SpeechSynthesisVoice[],
-    onSpeak() {
+    onSpeak(utter) {
       spoke = true;
+      queueMicrotask(() => utter.onend?.(new Event('end') as SpeechSynthesisEvent));
     },
   });
-  const missing = createChromiumTtsProvider(track(), helena, { ...utteranceOptions, voiceTimeoutMs: 20, pollMs: 10 });
-  assert.equal(await missing.speak('Hola.', { rate: 1, signal: new AbortController().signal }), 'failed');
-  assert.equal(missing.state(), 'idle');
-  assert.equal(spoke, false);
-  missing.dispose();
+  const local = createChromiumTtsProvider(track(), helena, { ...utteranceOptions, voiceTimeoutMs: 20, pollMs: 10 });
+  assert.equal(await local.speak('Hola.', { rate: 1, signal: new AbortController().signal }), 'done');
+  assert.equal(local.state(), 'idle');
+  assert.equal(spoke, true);
+  local.dispose();
+
+  const online = mockSynth({
+    voices: () => [{ name: 'Microsoft Zira Online', lang: 'en-US', voiceURI: 'cloud', localService: false }] as unknown as SpeechSynthesisVoice[],
+  });
+  const cloud = createChromiumTtsProvider(track(), online, { ...utteranceOptions, voiceTimeoutMs: 20, pollMs: 10 });
+  assert.equal(await cloud.speak('Hello.', { rate: 1, signal: new AbortController().signal }), 'failed');
+  cloud.dispose();
 
   const empty = mockSynth({ voices: () => [] });
   const none = createChromiumTtsProvider(track(), empty, { ...utteranceOptions, voiceTimeoutMs: 20, pollMs: 10 });

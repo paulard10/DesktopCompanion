@@ -12,6 +12,7 @@ Desktop Companion is an Electron overlay: a transparent window, a procedural rob
 - **Home.** A dock is visible by default. The robot can return there and sleep.
 - **Neon trail.** While it travels, it leaves a short neon trail. The trail stops when the robot is asleep.
 - **Chat.** Open it from the badge, a second click on an awake robot, or the tray. Demo mode answers locally and sends nothing over the network.
+- **Voice.** Hold the microphone button, speak in Spanish or English, and release. The transcript appears in the message box for you to correct before Send. A voice question can be read aloud with a Windows voice already installed on this PC. Typed messages stay silent unless you turn Conversation on.
 - **Qwen.** Switch the chat provider to Qwen to use your own Alibaba Cloud Model Studio key. Chat uses `qwen3.7-plus` through the Singapore endpoint. The conversation stays in memory on this PC.
 - **Screen vision, only with consent.** Choose a rectangle, confirm the crop, read what will be sent, and click **Ask Qwen**. One click sends that crop and your question once. There is no automatic retry, and nothing is captured before you confirm.
 - **Click-through.** The body, chat badge, and screen button accept clicks. The transparent desktop around them does not.
@@ -24,7 +25,7 @@ Desktop Companion is an Electron overlay: a transparent window, a procedural rob
 | Development build | `npm run dev` on Windows. |
 | Installer | Not published. There is no downloadable release yet. |
 
-This is an active personal project. The robot, Home, trail, follow behavior, chat, and consented screen vision are implemented in the source. They are exercised with local tests and a Windows smoke launch. An installer script exists for later packaging, but no official build is offered for download.
+This is an active personal project. The robot, Home, trail, follow behavior, chat, local voice, and consented screen vision are implemented in the source. They are exercised with local tests and a Windows smoke launch. An installer script exists for later packaging, but no official build is offered for download.
 
 ## Stack
 
@@ -68,6 +69,36 @@ The key is stored in the app's local credential vault and protected with the ope
 
 Screen sharing has its own confirmation. Drag a region, capture only that crop, and send it only with **Ask Qwen**. The privacy note names the provider, region, and model before the request.
 
+## Voice
+
+Hold **Hold** in the chat composer, speak, then release. Local transcription fills the message box. Edit it if needed, then use the normal Send button. Only that approved text is sent to Qwen. The recording is not kept, and the microphone is not left open.
+
+While the robot listens it looks attentive, with a small antenna sway and a greener glow. Transcription and waiting use the thinking expression. Speaking moves the eyes, antenna, and both arms together. **Stop speech** ends playback. **Mute** turns spoken replies off. Tray Sleep stops recording and speech immediately.
+
+Spoken replies use a voice installed in Windows. Spanish prefers Microsoft Pablo when it is present, and otherwise a local Spanish voice such as Microsoft Helena. English uses a local voice such as Microsoft Zira. Online voices are ignored. If neither language has a local voice, typing and sending still work.
+
+### Whisper on this PC
+
+`npm install` does not download a speech engine or a model. Another PC will not transcribe until those files are supplied.
+
+Development looks in `.local-asr` at the project root. That directory is gitignored. A packaged build looks in `resources/speech`, which this repository does not ship. To use a different folder, set `DESKTOP_COMPANION_SPEECH_ROOT` to its absolute path before starting the app.
+
+The folder must contain this layout:
+
+```text
+bin/whisper-cli.exe
+bin/whisper.dll
+bin/ggml.dll
+bin/ggml-base.dll
+bin/ggml-cpu-alderlake.dll
+bin/ggml-cpu-x64.dll
+ggml-tiny.bin
+```
+
+These are the pinned whisper.cpp 1.9.2 Windows x64 CPU binaries and the multilingual Tiny model, `ggml-tiny.bin`, not the English-only file. The app checks each file's SHA-256 and refuses to start if one is missing or different. The expected hashes are in `src/main/localSpeech.ts`.
+
+Transcription runs for one utterance at a time, on two CPU threads, for at most 20 seconds of audio. It needs at least 1,024 MB of free memory. On the development laptop, a short clip takes a few seconds. Tiny can miss words, especially in noise. Auto, ES, and EN select the language passed to Whisper.
+
 ## Known limitations
 
 - Windows only. There is no macOS or Linux build.
@@ -75,7 +106,7 @@ Screen sharing has its own confirmation. Drag a region, capture only that crop, 
 - Follow Cursor stays off until you enable it.
 - The robot sleeps after about two minutes of quiet. Meaningful follow, chat, screen selection, and an in-progress Qwen request postpone that. Cursor movement does not wake a sleeping robot. If Home is hidden, it sleeps in place.
 - Click-through can fail against an elevated window. The tray has a temporary whole-window recovery switch for that case.
-- Speech input and spoken replies use this PC. They are optional and are not a cloud voice service.
+- Voice needs the local Whisper files described above and a Windows voice for Spanish or English. Recordings are not stored. Transcription can refuse to start when free memory is below 1,024 MB.
 - Qwen calls depend on your key, quota, and the provider being reachable. The app does not switch models or retry a failed call.
 
 ## Roadmap

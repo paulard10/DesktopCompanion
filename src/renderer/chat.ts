@@ -2,7 +2,7 @@ import { sendDisabledReason } from '../shared/chatGate';
 import { shouldFollowTranscript } from '../shared/chatScroll';
 import { MAX_CHAT_CHARS, validateChatText, type ChatLine } from '../shared/demoConversation';
 import type { ChatStatusMessage, TtsSettingsMessage } from '../shared/ipc';
-import { PABLO_VOICE_NAME } from '../shared/textToSpeech';
+import { guessSpeechLang, pickSpokenVoice, speechLanguage } from '../shared/textToSpeech';
 import { transcriptPlacement } from '../shared/speechAudio.ts';
 import {
   classifyVoiceError,
@@ -62,6 +62,8 @@ const ttsAutoRead = document.querySelector<HTMLInputElement>('#tts-autoread');
 const ttsRate = document.querySelector<HTMLInputElement>('#tts-rate');
 const ttsVoiceLine = document.querySelector<HTMLElement>('#tts-voice-line');
 const conversationMode = document.querySelector<HTMLInputElement>('#conversation-mode');
+const speechLang = document.querySelector<HTMLSelectElement>('#speech-lang');
+const voiceMute = document.querySelector<HTMLButtonElement>('#voice-mute');
 const voicePhase = document.querySelector<HTMLElement>('#voice-phase');
 
 const bridge = window.chat;
@@ -98,7 +100,7 @@ if (
   !mic || !speechControls || !speechState || !speechStop || !speechCancel ||
   !speechStaged || !speechText || !speechInsert || !speechDiscard || !speechError ||
   !ttsBar || !ttsStatus || !ttsStop || !ttsError || !ttsEnabled || !ttsAutoRead || !ttsRate || !ttsVoiceLine ||
-  !conversationMode || !voicePhase ||
+  !conversationMode || !speechLang || !voiceMute || !voicePhase ||
   !bridge
 ) {
   console.error('desktop-companion: chat page is incomplete');
@@ -116,6 +118,8 @@ if (
   const endpointInput = endpoint;
   const keyInput = apiKey;
   const micButton = mic;
+  const languageChoice = speechLang;
+  const muteButton = voiceMute;
   const voiceControls = speechControls;
   const voiceState = speechState;
   const voiceStop = speechStop;
@@ -133,6 +137,8 @@ if (
   let pabloReady: boolean | null = null;
   let lastSendReason = '';
   let capturePose: 'ATTENTIVE' | 'THINKING' | 'IDLE' | 'ERROR' | 'CLEAR' = 'CLEAR';
+  let voiceReplyPending = false;
+  let pointerHeld = false;
   const voice = createVoiceSession();
   const tts = createChromiumTtsProvider({
     onState() {
@@ -143,17 +149,21 @@ if (
       refreshTtsUi();
     },
     onVoices(voices, picked, phase) {
-      pabloReady = picked !== null;
-      if (picked) {
+      const spanish = pickSpokenVoice(voices, 'es');
+      const english = pickSpokenVoice(voices, 'en');
+      pabloReady = spanish !== null || english !== null;
+      if (pabloReady) {
         clearTtsError();
-        ttsVoiceLine.textContent = `Voice: ${picked.name} (${picked.lang || 'es-ES'}) on this PC.`;
+        const names = [spanish, english].filter((voice, index, list) => voice && list.findIndex((item) => item?.voiceURI === voice.voiceURI) === index);
+        ttsVoiceLine.textContent = `Voice: ${names.map((voice) => `${voice?.name} (${voice?.lang || 'local'})`).join(' · ')} on this PC.`;
       } else if (phase === 'pending') {
-        ttsVoiceLine.textContent = 'Checking installed Spanish voices…';
+        ttsVoiceLine.textContent = 'Checking voices installed on this PC…';
         clearTtsError();
       } else {
-        ttsVoiceLine.textContent = 'Microsoft Pablo (es-ES) was not found.';
-        showTtsError('Microsoft Pablo (es-ES) was not found. Speech stays off. You can still send text messages.');
+        ttsVoiceLine.textContent = 'No local Spanish or English voice was found.';
+        showTtsError('No local Windows voice was found. You can still type and send messages.');
       }
+      void picked;
       refreshTtsUi();
       bridge.reportTtsVoices({
         count: voices.length,
@@ -227,7 +237,9 @@ if (
   const refreshTtsUi = (): void => {
     const speaking = tts.state() === 'speaking';
     ttsBar.hidden = !speaking;
-    ttsStatus.textContent = speaking ? `Speaking · ${PABLO_VOICE_NAME}` : '';
+    ttsStatus.textContent = speaking ? 'Speaking' : '';
+    muteButton.textContent = ttsSettings.enabled ? 'Mute' : 'Unmute';
+    muteButton.setAttribute('aria-pressed', ttsSettings.enabled ? 'false' : 'true');
     for (const button of history.querySelectorAll<HTMLButtonElement>('.speak-reply')) {
       button.disabled = !ttsSettings.enabled || speaking || speech.currentState !== 'idle' || pabloReady === false;
     }
@@ -255,6 +267,10 @@ if (
       : state === 'requesting' ? 'Requesting microphone access…'
         : state === 'transcribing' ? 'Transcribing locally…' : '';
     micButton.disabled = state !== 'idle' || generating || tts.state() === 'speaking';
+    micButton.dataset.live = state === 'recording' ? '1' : '0';
+    if (state === 'recording' && !pointerHeld) {
+      void speech.stop();
+    }
     if (state === 'requesting' || state === 'recording') {
       noteCapture('ATTENTIVE');
     } else if (state === 'transcribing') {
@@ -285,6 +301,7 @@ if (
     }
     if (transcriptPlacement(draftBeforeRecording, composer.value) === 'insert') {
       composer.value = text;
+      voiceReplyPending = true;
       if (ttsSettings.conversation) {
         voice.apply('transcript');
         renderVoice();
@@ -340,7 +357,7 @@ if (
       return;
     }
     if (pabloReady === false) {
-      showTtsError('Microsoft Pablo is unavailable.');
+      showTtsError('No local Windows voice is available.');
       noteCapture('ERROR');
       return;
     }
@@ -354,9 +371,13 @@ if (
     speakingItem.classList.add('is-speaking');
     const gate = new AbortController();
     try {
-      const outcome = await tts.speak(text, { rate: ttsSettings.rate, signal: gate.signal });
+      const outcome = await tts.speak(text, {
+        rate: ttsSettings.rate,
+        signal: gate.signal,
+        lang: guessSpeechLang(text, languageChoice.value === 'en' ? 'en' : 'es'),
+      });
       if (outcome === 'failed') {
-        showTtsError('Could not speak with Microsoft Pablo. Check Windows speech settings.');
+        showTtsError('Could not speak with a local Windows voice. Check Windows speech settings.');
         noteCapture('ERROR');
       }
     } finally {
@@ -472,20 +493,53 @@ if (
     releaseVoice();
     bridge.minimizeChat();
   });
-  micButton.addEventListener('click', () => {
+  const beginHold = (): void => {
+    if (pointerHeld || generating || speech.currentState !== 'idle' || tts.state() === 'speaking') return;
+    if (pendingTranscript) {
+      showSpeechError('Insert or discard the previous transcript first.');
+      return;
+    }
+    pointerHeld = true;
     if (voice.phase() === 'SPEAKING') {
       voice.apply('cancel');
       voice.apply('released');
     }
     tts.stop();
-    if (generating || speech.currentState !== 'idle') return;
-    if (pendingTranscript) {
-      showSpeechError('Insert or discard the previous transcript first.');
-      return;
-    }
     clearSpeechError();
+    speech.setLanguage(speechLanguage(languageChoice.value));
     draftBeforeRecording = composer.value;
     void speech.start();
+  };
+  const endHold = (): void => {
+    if (!pointerHeld && speech.currentState !== 'recording') return;
+    pointerHeld = false;
+    if (speech.currentState === 'recording') {
+      void speech.stop();
+      return;
+    }
+    if (speech.currentState === 'requesting') {
+      speech.cancel();
+    }
+  };
+  micButton.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    micButton.setPointerCapture(event.pointerId);
+    beginHold();
+  });
+  micButton.addEventListener('pointerup', endHold);
+  micButton.addEventListener('pointercancel', endHold);
+  micButton.addEventListener('keydown', (event) => {
+    if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
+      event.preventDefault();
+      beginHold();
+    }
+  });
+  micButton.addEventListener('keyup', (event) => {
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      endHold();
+    }
   });
   voiceStop.addEventListener('click', () => { void speech.stop(); });
   voiceCancel.addEventListener('click', () => {
@@ -551,10 +605,11 @@ if (
     if (generating || !validated.ok) {
       return;
     }
-    if (ttsSettings.conversation) {
+    if (ttsSettings.enabled && (voiceReplyPending || ttsSettings.conversation)) {
       voice.arm();
       renderVoice();
     }
+    voiceReplyPending = false;
     noteCapture('CLEAR');
     bridge.sendMessage(validated.text);
     composer.value = '';
@@ -793,6 +848,9 @@ if (
   };
   ttsEnabled.addEventListener('change', () => {
     bridge.setTtsSettings({ enabled: ttsEnabled.checked });
+  });
+  muteButton.addEventListener('click', () => {
+    bridge.setTtsSettings({ enabled: !ttsSettings.enabled });
   });
   ttsAutoRead.addEventListener('change', () => {
     bridge.setTtsSettings({ autoRead: ttsAutoRead.checked });

@@ -51,7 +51,7 @@
             <label><input type="checkbox" id="tts-autoread" /> Auto-read replies (default off)</label>
             <label class="stack" for="tts-rate">Speech rate</label>
             <input id="tts-rate" type="range" min="0.75" max="1.25" step="0.05" value="1" />
-            <p id="tts-voice-line" class="key-state">Voice: Microsoft Pablo (es-ES) via this PC.</p>
+            <p id="tts-voice-line" class="key-state">Voice: checking the voices installed on this PC.</p>
           </fieldset>
         </div>
       </details>
@@ -87,13 +87,21 @@
         <form id="composer" class="composer">
           <label class="field" for="draft">Message</label>
           <textarea id="draft" maxlength="500" rows="1" placeholder="Write a message"></textarea>
-          <button type="button" id="mic" class="mic" aria-label="Record a Spanish message" title="Record locally">Mic</button>
+          <label class="speech-lang" for="speech-lang">
+            <select id="speech-lang" aria-label="Speech language">
+              <option value="auto" selected>Auto</option>
+              <option value="es">ES</option>
+              <option value="en">EN</option>
+            </select>
+          </label>
+          <button type="button" id="mic" class="mic" aria-label="Hold to record" title="Hold to talk. Release to transcribe.">Hold</button>
           <button type="button" id="stop" class="stop" hidden aria-label="Stop reply">Stop</button>
           <button type="submit" id="send" class="send">Send</button>
         </form>
         <div class="toolbar">
           <p id="hint" class="hint">Enter sends. Shift+Enter adds a line. Esc stops a reply.</p>
           <div class="toolbar-actions">
+            <button type="button" id="voice-mute" class="voice-mute">Mute</button>
             <label class="voice-mode" for="conversation-mode">
               <input type="checkbox" id="conversation-mode" />
               Conversation

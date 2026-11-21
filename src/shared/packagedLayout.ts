@@ -23,6 +23,23 @@ export function companionSpeechRoot(resourcesPath: string): string {
   return path.join(resourcesPath, 'speech');
 }
 
+/** Where whisper-cli.exe and ggml-tiny.bin live. They are not part of the repository. */
+export function speechAssetRoot(input: {
+  packaged: boolean;
+  resourcesPath: string;
+  projectRoot: string;
+  configuredPath?: string | undefined;
+}): string {
+  const configured = input.configuredPath?.trim();
+  if (configured) {
+    return path.resolve(configured);
+  }
+  if (input.packaged) {
+    return companionSpeechRoot(input.resourcesPath);
+  }
+  return path.join(input.projectRoot, '.local-asr');
+}
+
 /**
  * The tray PNG is unpacked beside the asar because the native image loader
  * does not read files stored only inside the archive.

@@ -22,7 +22,7 @@ import { createSafeCredentialStore } from './safeCredentialStore.js';
 import { createLocalSpeechJob } from './localSpeech.js';
 import { createTtsSettings } from './ttsSettings.js';
 import { clampSpeechRate } from '../shared/textToSpeech.js';
-import { resolveTrayIcon } from '../shared/packagedLayout.js';
+import { resolveTrayIcon, speechAssetRoot } from '../shared/packagedLayout.js';
 import type { MicrophoneGate } from './security.js';
 
 const ACTIVITY_GAP_MS = 2_000;
@@ -31,6 +31,7 @@ export interface ChatController {
   open: () => void;
   hide: () => void;
   reposition: () => void;
+  stopVoice: () => void;
   activity: () => { open: boolean; busy: boolean; speaking: boolean; listening: boolean };
   destroy: () => Promise<void>;
 }
@@ -54,9 +55,12 @@ export async function createChatController(options: {
   let userSized = false;
   let lastActivityAt = 0;
   const speech = createLocalSpeechJob({
-    assetRoot: app.isPackaged
-      ? path.join(process.resourcesPath, 'speech')
-      : path.resolve(__dirname, '../../.local-asr'),
+    assetRoot: speechAssetRoot({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      projectRoot: path.resolve(__dirname, '../..'),
+      configuredPath: process.env.DESKTOP_COMPANION_SPEECH_ROOT,
+    }),
   });
   const storageDir = path.join(app.getPath('userData'), 'companion');
   const vault = createSafeCredentialStore(path.join(storageDir, 'qwen-key.bin'));
@@ -279,11 +283,12 @@ export async function createChatController(options: {
     if (speechFrame(event)) options.microphoneGate.disarm(event.sender);
   };
   const onSpeechTranscribe = async (
-    event: IpcMainInvokeEvent, payload: unknown,
+    event: IpcMainInvokeEvent, payload: unknown, language: unknown,
   ): Promise<{ text?: string; error?: string }> => {
     if (!speechFrame(event)) return { error: 'Chat is closed.' };
+    const chosen = language === 'en' || language === 'auto' ? language : 'es';
     try {
-      const text = await speech.transcribe(payload as Uint8Array);
+      const text = await speech.transcribe(payload as Uint8Array, chosen);
       return speechFrame(event) ? { text } : { error: 'Chat is closed.' };
     } catch (error) {
       return { error: error instanceof Error ? error.message : 'Local transcription failed.' };
@@ -395,6 +400,18 @@ export async function createChatController(options: {
     open,
     hide,
     reposition,
+    stopVoice(): void {
+      speech.cancel();
+      captureBusy = false;
+      ttsSpeaking = false;
+      voicePose = null;
+      if (win && !win.isDestroyed()) {
+        options.microphoneGate.disarm(win.webContents);
+        win.webContents.send(IpcChannels.speechForceStop);
+        win.webContents.send(IpcChannels.ttsForceStop);
+      }
+      publishOverlayPresence();
+    },
     activity(): { open: boolean; busy: boolean; speaking: boolean; listening: boolean } {
       return {
         open: Boolean(win && !win.isDestroyed() && win.isVisible()),

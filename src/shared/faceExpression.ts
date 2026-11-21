@@ -146,8 +146,8 @@ export function writeEyeTarget(cue: EyeCue, now: number, reducedMotion: boolean,
   if (cue === 'LISTENING') {
     assign(
       out,
-      { openness: 1.16, curvature: 0.98, lift: 0.02, gazePitch: -0.015, glow: 1.05 },
-      { openness: 1.16, curvature: 0.98, lift: 0.02, gazePitch: -0.015, glow: 1.05 },
+      { openness: 1.16, curvature: 0.98, lift: 0.02, gazePitch: -0.015, glow: 1.18 },
+      { openness: 1.16, curvature: 0.98, lift: 0.02, gazePitch: -0.015, glow: 1.18 },
     );
     return;
   }

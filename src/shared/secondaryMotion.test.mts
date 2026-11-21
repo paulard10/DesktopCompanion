@@ -145,7 +145,8 @@ test('speaking motion is held only while the speaking cue is current', () => {
   const idle = sample('IDLE', 'none', -1, 1_000);
   assert.ok(speaking.antennaSway > 0.15);
   assert.equal(speaking.headTilt, 0);
-  assert.equal(speaking.leftArmLift, 0);
+  assert.equal(speaking.leftArmLift, speaking.rightArmLift);
+  assert.ok(speaking.leftArmLift > 0);
   assert.equal(speaking.bodyBob, 0);
   assert.equal(speaking.ambientMix, 0);
   assert.equal(idle.antennaSway, 0);
