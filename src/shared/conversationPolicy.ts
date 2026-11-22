@@ -19,7 +19,18 @@ export interface ModelMessage {
 
 export function modelMessages(history: readonly ChatLine[]): ModelMessage[] {
   const spoken: ModelMessage[] = [];
-  for (const line of history) {
+  for (let index = 0; index < history.length; index += 1) {
+    const line = history[index];
+    if (!line) {
+      continue;
+    }
+    const previous = index > 0 ? history[index - 1] : undefined;
+    if (line.role === 'user' && line.context === true && index !== history.length - 1) {
+      continue;
+    }
+    if (previous?.role === 'user' && previous.context === true && line.role !== 'user') {
+      continue;
+    }
     if (line.role === 'user') {
       spoken.push({ role: 'user', text: line.text });
     } else if (line.role === 'assistant') {

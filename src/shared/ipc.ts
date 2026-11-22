@@ -1,3 +1,4 @@
+import type { ClipboardOffer } from './clipboardContext.js';
 import type { EyePreviewCue } from './faceExpression.js';
 
 export const IpcChannels = {
@@ -16,6 +17,12 @@ export const IpcChannels = {
   chatMinimize: 'chat:minimize',
   chatActivity: 'chat:activity',
   chatConversation: 'chat:conversation',
+  clipboardOffer: 'clipboard:offer',
+  clipboardDismiss: 'clipboard:dismiss',
+  clipboardPose: 'clipboard:pose',
+  clipboardRequest: 'clipboard:request',
+  chatSelectScreen: 'chat:select-screen',
+  chatSendContext: 'chat:send-context',
   chatHistory: 'chat:history',
   chatFocus: 'chat:focus',
   chatDelta: 'chat:delta',
@@ -135,6 +142,12 @@ export interface CompanionBridge {
 export interface ChatBridge {
   notifyReady: () => void;
   sendMessage: (text: string) => void;
+  sendContextMessage: (text: string) => void;
+  dismissCopiedText: () => void;
+  requestCopiedText: () => void;
+  requestScreenSelection: () => void;
+  notifyContextPose: (pose: 'curious' | 'attentive' | 'clear') => void;
+  onCopiedText: (listener: (offer: ClipboardOffer) => void) => () => void;
   stopGeneration: () => void;
   saveKey: (key: string) => void;
   removeKey: () => void;

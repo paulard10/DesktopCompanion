@@ -14,6 +14,7 @@ import {
 } from '../shared/voiceSession.ts';
 import { createChromiumTtsProvider } from './chromiumTtsProvider.ts';
 import { SpeechCapture } from './speechCapture.ts';
+import { mountCopiedText } from './copiedTextPanel.ts';
 
 declare global {
   interface ImportMeta {
@@ -75,6 +76,19 @@ const voiceMute = document.querySelector<HTMLButtonElement>('#voice-mute');
 const voicePhase = document.querySelector<HTMLElement>('#voice-phase');
 
 const bridge = window.chat;
+let beforeHide = (): void => {};
+if (closeButton && bridge) {
+  closeButton.addEventListener('click', () => {
+    beforeHide();
+    bridge.closeChat();
+  });
+}
+if (minimizeButton && bridge) {
+  minimizeButton.addEventListener('click', () => {
+    beforeHide();
+    bridge.minimizeChat();
+  });
+}
 let shown: ChatLine[] = [];
 let stickToBottom = true;
 let streamItem: HTMLLIElement | null = null;
@@ -574,14 +588,6 @@ if (
   });
 
   follow.addEventListener('click', scrollToEnd);
-  closeButton.addEventListener('click', () => {
-    endConversation();
-    bridge.closeChat();
-  });
-  minimizeButton.addEventListener('click', () => {
-    endConversation();
-    bridge.minimizeChat();
-  });
   const beginRecording = (): void => {
     if (generating || speech.currentState !== 'idle' || tts.state() === 'speaking') return;
     if (pendingTranscript) {
@@ -615,6 +621,7 @@ if (
     bridge.notifyConversation(false);
     renderVoice();
   };
+  beforeHide = endConversation;
   const beginHold = (): void => {
     if (micMode !== 'hold' || pointerHeld || generating || speech.currentState !== 'idle' || tts.state() === 'speaking') return;
     if (pendingTranscript) {
@@ -766,6 +773,47 @@ if (
     renderVoice();
   });
 
+  const attachButton = document.querySelector<HTMLButtonElement>('#attach');
+  const attachMenu = document.querySelector<HTMLElement>('#attach-menu');
+  const attachCopied = document.querySelector<HTMLButtonElement>('#attach-copied');
+  const attachScreen = document.querySelector<HTMLButtonElement>('#attach-screen');
+  const setAttachOpen = (open: boolean): void => {
+    if (!attachMenu || !attachButton) {
+      return;
+    }
+    attachMenu.hidden = !open;
+    attachButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  attachButton?.addEventListener('click', () => {
+    setAttachOpen(attachMenu?.hidden !== false);
+  });
+  attachCopied?.addEventListener('click', () => {
+    setAttachOpen(false);
+    bridge.requestCopiedText();
+  });
+  attachScreen?.addEventListener('click', () => {
+    setAttachOpen(false);
+    bridge.requestScreenSelection();
+  });
+  document.addEventListener('click', (event) => {
+    if (!(event.target instanceof Node) || attachButton?.contains(event.target) || attachMenu?.contains(event.target)) {
+      return;
+    }
+    setAttachOpen(false);
+  });
+
+  const refreshCopied = mountCopiedText(document, bridge, {
+    busy: () => generating,
+    onAuthorize() {
+      awaitingConfirm = false;
+      if (ttsSettings.enabled && liveConversation) {
+        voice.arm();
+        renderVoice();
+      }
+      noteCapture('CLEAR');
+    },
+  });
+
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const validated = validateChatText(composer.value);
@@ -793,6 +841,11 @@ if (
   });
 
   window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && attachMenu && !attachMenu.hidden && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      setAttachOpen(false);
+      return;
+    }
     if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey || !generating) {
       return;
     }
@@ -955,6 +1008,7 @@ if (
   bridge.onDelta(showDelta);
   bridge.onStatus((next) => {
     generating = next.busy;
+    refreshCopied();
     history.setAttribute('aria-busy', next.busy ? 'true' : 'false');
     if (ttsSettings.conversation) {
       if (next.presence === 'ERROR') {

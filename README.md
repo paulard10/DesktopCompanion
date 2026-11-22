@@ -11,7 +11,8 @@ Desktop Companion is an Electron overlay: a transparent window, a procedural rob
 - **Follow Cursor.** Turn this on from the tray and the robot glides after the pointer, with a lean, a small bank, and a lagging antenna.
 - **Home.** A dock is visible by default. The robot can return there and sleep.
 - **Neon trail.** While it travels, it leaves a short neon trail. The trail stops when the robot is asleep.
-- **Chat.** Open it from the badge, a second click on an awake robot, or the tray. The window is a short conversation: messages, one text box, a microphone, and Send. Connection details and extra voice options stay in Settings. Demo mode answers locally and sends nothing over the network.
+- **Chat.** Open it from the badge, a second click on an awake robot, or the tray. The window is a short conversation: messages, one text box, an attachment button, a microphone, and Send. Connection details and extra voice options stay in Settings. Demo mode answers locally and sends nothing over the network.
+- **Ask about copied text.** Copy text in another app, then choose the command from the tray or the chat attachment menu. The chat shows that text. Choose Explain, Summarize, Translate, or Ask anything, review it, and press Send. Copying alone does not open the feature or send anything.
 - **Voice.** Click the microphone to record and click it again to transcribe. The text stays in the box until you press Send. Hold to talk is in Settings. Conversation mode is also in Settings and stays off until you turn it on. Replies can be spoken with a Windows voice already installed on this PC.
 - **Qwen.** Switch the chat provider to Qwen to use your own Alibaba Cloud Model Studio key. Chat uses `qwen3.7-plus` through the Singapore endpoint. The conversation stays in memory on this PC.
 - **Screen vision, only with consent.** Choose a rectangle, confirm the crop, read what will be sent, and click **Ask Qwen**. One click sends that crop and your question once. There is no automatic retry, and nothing is captured before you confirm.
@@ -25,7 +26,7 @@ Desktop Companion is an Electron overlay: a transparent window, a procedural rob
 | Development build | `npm run dev` on Windows. |
 | Installer | Not published. There is no downloadable release yet. |
 
-This is an active personal project. The robot, Home, trail, follow behavior, chat, local voice, and consented screen vision are implemented in the source. They are exercised with local tests and a Windows smoke launch. An installer script exists for later packaging, but no official build is offered for download.
+This is an active personal project. The robot, Home, trail, follow behavior, chat, local voice, copied-text questions, and consented screen vision are implemented in the source. They are exercised with local tests and a Windows smoke launch. An installer script exists for later packaging, but no official build is offered for download.
 
 ## Stack
 
@@ -69,6 +70,19 @@ The key is stored in the app's local credential vault and protected with the ope
 
 Screen sharing has its own confirmation. Drag a region, capture only that crop, and send it only with **Ask Qwen**. The privacy note names the provider, region, and model before the request.
 
+## Ask about copied text
+
+Copy text with Ctrl+C in another app. Then open it in one of two ways:
+
+- Tray → **Ask about copied text**
+- The **+** button in the chat composer → **Ask about copied text**
+
+The same menu also starts **Select screen area**. The tray command for screen selection still works.
+
+The chat shows the exact copied text. Choose **Explain**, **Summarize**, **Translate**, or **Ask anything**. Translate switches between Spanish and English. Ask anything uses a question you type, up to 500 characters. Read the prepared question and press the panel **Send**. That is the only step that delivers it to the existing chat. Demo mode answers locally. Qwen is used only when that provider is selected.
+
+The copied text is treated as untrusted content, not as instructions. It is read once, when you choose the command. The app does not watch the clipboard, read clipboard history, write or clear the clipboard, log the text, or save it. Closing the panel, pressing Escape, or closing chat discards it, and it is not attached to later questions. An empty clipboard says to copy text and try again. A selection longer than 4,000 characters is refused and is not shortened or sent. The ordinary message box stays limited to 500 characters.
+
 ## Voice
 
 The chat composer has one microphone. Click it to start, then click it again. Local transcription fills the message box. Edit it if needed, then use Send. Nothing is sent until you press Send.
@@ -111,6 +125,7 @@ Transcription runs for one utterance at a time, on two CPU threads, for at most 
 - The robot sleeps after about two minutes of quiet. Meaningful follow, chat, screen selection, and an in-progress Qwen request postpone that. Cursor movement does not wake a sleeping robot. If Home is hidden, it sleeps in place.
 - Click-through can fail against an elevated window. The tray has a temporary whole-window recovery switch for that case.
 - Voice needs the local Whisper files described above and a Windows voice for Spanish or English. Recordings are not stored. Transcription can refuse to start when free memory is below 1,024 MB.
+- Copied text is plain text only, up to 4,000 characters, and only after you choose the command. There is no clipboard watcher, no image or file reading, and no automatic send.
 - Qwen calls depend on your key, quota, and the provider being reachable. The app does not switch models or retry a failed call.
 
 ## Roadmap

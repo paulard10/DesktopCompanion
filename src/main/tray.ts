@@ -13,6 +13,7 @@ export function createTray(options: {
   onWake: () => void;
   onSleep: () => void;
   onOpenChat: () => void;
+  onAskCopied?: () => void;
   onToggleRecoveryCapture: (enabled: boolean) => void;
   isRecoveryCapture: () => boolean;
   isWandering: () => boolean;
@@ -54,6 +55,9 @@ export function createTray(options: {
       { label: 'Wake', click: options.onWake },
       { label: 'Sleep', click: options.onSleep },
       { label: 'Open Chat', click: options.onOpenChat },
+      ...(options.onAskCopied
+        ? [{ label: 'Ask about copied text', click: options.onAskCopied }]
+        : []),
       { type: 'separator' },
       {
         label: 'Movement',

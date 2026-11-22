@@ -13,6 +13,7 @@ import { createOverlayWindow, preloadPath, rendererRoot, type OverlayController 
 import { createTrailWindow, type TrailController } from './trailWindow.js';
 import { createHomeWindow, type HomeController } from './homeWindow.js';
 import { createTray } from './tray.js';
+import { readCopiedText } from './clipboardText.js';
 import { createInstalledLoginStartup } from './windowsLoginStartup.js';
 import { APP_USER_MODEL_ID } from '../shared/windowsLoginStartup.js';
 import { createUserPreferencesStore, type UserPreferencesStore } from '../shared/userPreferences.js';
@@ -249,6 +250,10 @@ void app.whenReady().then(async () => {
   chat = await createChatController({
     dev,
     preloadPath: path.join(preloadPath(), '../chatPreload.js'),
+    onSelectScreen: () => {
+      chat?.hide();
+      selection?.start();
+    },
     getAnchor: () => overlay?.getBounds() ?? { x: 0, y: 0, ...COMPANION_LAYOUT.windowDip },
     getWorkArea: (anchor) => screen.getDisplayMatching(anchor).workArea,
     onActivity: () => {
@@ -624,6 +629,12 @@ void app.whenReady().then(async () => {
       overlay?.sleep();
     },
     onOpenChat: () => { selection?.cancel(); chat?.open(); },
+    onAskCopied: () => {
+      selection?.cancel();
+      void readCopiedText().then((offer) => {
+        chat?.offerClipboard(offer);
+      });
+    },
     onToggleRecoveryCapture: (enabled) => { selection?.cancel(); overlay?.setRecoveryCapture(enabled); },
     isRecoveryCapture: () => overlay?.isRecoveryCapture() ?? false,
     isWandering: () => wander.enabled,

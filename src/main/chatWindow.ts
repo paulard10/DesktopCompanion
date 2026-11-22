@@ -7,6 +7,8 @@ import { createDemoProvider } from '../shared/demoProvider.js';
 import { finishPresenceTransition, presenceLogReason, resolveCharacterPresence, type LivePresence, type PresenceReason } from '../shared/characterPresence.js';
 import { isEyePreviewCue, type EyePreviewCue } from '../shared/faceExpression.js';
 import { isPresenceName } from '../shared/presence.js';
+import { isContextMessage, type ClipboardOffer } from '../shared/clipboardContext.js';
+import { readCopiedText } from './clipboardText.js';
 import { IpcChannels } from '../shared/ipc.js';
 import { validateApiKey } from '../shared/keyVault.js';
 import { classifyProviderHttp, providerFailureMessage } from '../shared/providerErrors.js';
@@ -32,6 +34,7 @@ export interface ChatController {
   hide: () => void;
   reposition: () => void;
   stopVoice: () => void;
+  offerClipboard: (offer: ClipboardOffer) => void;
   activity: () => { open: boolean; busy: boolean; speaking: boolean; listening: boolean };
   destroy: () => Promise<void>;
 }
@@ -47,6 +50,7 @@ export async function createChatController(options: {
   onPresence: (presence: 'ATTENTIVE' | 'THINKING' | 'RESPONDING' | 'SPEAKING' | 'HAPPY' | 'ERROR' | 'IDLE' | 'CLEAR') => void;
   onEyePreview: (cue: EyePreviewCue) => void;
   onMoveTest: () => { received: boolean; block: 'chat' | 'voice' | 'busy' | 'none'; message: string };
+  onSelectScreen?: () => void;
   isQuitting: () => boolean;
   microphoneGate: MicrophoneGate;
 }): Promise<ChatController> {
@@ -73,6 +77,7 @@ export async function createChatController(options: {
   let shownReason: PresenceReason | '' = '';
   let captureBusy = false;
   let conversationHold = false;
+  let pendingOffer: ClipboardOffer | null = null;
   const liveCapture = (): boolean => ttsSpeaking || voicePose === 'ATTENTIVE' || voicePose === 'THINKING';
   const publishOverlayPresence = (): void => {
     const current = session.status();
@@ -159,6 +164,54 @@ export async function createChatController(options: {
     if (win && !win.isDestroyed() && win.isVisible()) {
       win.webContents.send(IpcChannels.chatFocus);
     }
+    if (pendingOffer) {
+      deliverCopiedOffer();
+      applyContextPose('curious');
+    }
+  };
+
+  const onContextSend = (event: IpcMainEvent, payload: unknown): void => {
+    if (!isChatFrame(event, options.dev) || typeof payload !== 'string' || !isContextMessage(payload) || session.status().busy) {
+      console.log('desktop-companion: clipboard-context rejected');
+      return;
+    }
+    pendingOffer = null;
+    options.onEyePreview('CLEAR');
+    shownPresence = '';
+    shownReason = '';
+    markIntentional();
+    void session.send(payload, { context: true });
+  };
+
+  const onCopiedDismiss = (event: IpcMainEvent): void => {
+    if (!isChatFrame(event, options.dev)) {
+      return;
+    }
+    pendingOffer = null;
+    applyContextPose('clear');
+  };
+
+  const onClipboardRequest = (event: IpcMainEvent): void => {
+    if (!isChatFrame(event, options.dev)) {
+      return;
+    }
+    void readCopiedText().then((offer) => {
+      offerClipboard(offer);
+    });
+  };
+
+  const onSelectScreen = (event: IpcMainEvent): void => {
+    if (!isChatFrame(event, options.dev)) {
+      return;
+    }
+    options.onSelectScreen?.();
+  };
+
+  const onCopiedPose = (event: IpcMainEvent, payload: unknown): void => {
+    if (!isChatFrame(event, options.dev) || (payload !== 'curious' && payload !== 'attentive' && payload !== 'clear')) {
+      return;
+    }
+    applyContextPose(payload);
   };
 
   const onSend = (event: IpcMainEvent, payload: unknown): void => {
@@ -387,6 +440,11 @@ export async function createChatController(options: {
   ipcMain.on(IpcChannels.openChat, onOpen);
   ipcMain.on(IpcChannels.chatReady, onReady);
   ipcMain.on(IpcChannels.chatSend, onSend);
+  ipcMain.on(IpcChannels.chatSendContext, onContextSend);
+  ipcMain.on(IpcChannels.clipboardDismiss, onCopiedDismiss);
+  ipcMain.on(IpcChannels.clipboardPose, onCopiedPose);
+  ipcMain.on(IpcChannels.clipboardRequest, onClipboardRequest);
+  ipcMain.on(IpcChannels.chatSelectScreen, onSelectScreen);
   ipcMain.on(IpcChannels.chatStop, onStop);
   ipcMain.on(IpcChannels.chatSaveKey, onSaveKey);
   ipcMain.on(IpcChannels.chatRemoveKey, onRemoveKey);
@@ -414,6 +472,7 @@ export async function createChatController(options: {
     open,
     hide,
     reposition,
+    offerClipboard,
     stopVoice(): void {
       speech.cancel();
       captureBusy = false;
@@ -449,12 +508,18 @@ export async function createChatController(options: {
       previewPose = null;
       captureBusy = false;
       conversationHold = false;
+      pendingOffer = null;
       publishOverlayPresence();
       await speech.waitForIdle();
       session.stop();
       ipcMain.removeListener(IpcChannels.openChat, onOpen);
       ipcMain.removeListener(IpcChannels.chatReady, onReady);
       ipcMain.removeListener(IpcChannels.chatSend, onSend);
+      ipcMain.removeListener(IpcChannels.chatSendContext, onContextSend);
+      ipcMain.removeListener(IpcChannels.clipboardDismiss, onCopiedDismiss);
+      ipcMain.removeListener(IpcChannels.clipboardPose, onCopiedPose);
+      ipcMain.removeListener(IpcChannels.clipboardRequest, onClipboardRequest);
+      ipcMain.removeListener(IpcChannels.chatSelectScreen, onSelectScreen);
       ipcMain.removeListener(IpcChannels.chatStop, onStop);
       ipcMain.removeListener(IpcChannels.chatSaveKey, onSaveKey);
       ipcMain.removeListener(IpcChannels.chatRemoveKey, onRemoveKey);
@@ -504,6 +569,10 @@ export async function createChatController(options: {
   function hide(): void {
     session.stop();
     speech.cancel();
+    pendingOffer = null;
+    if (win && !win.isDestroyed() && pageReady) {
+      win.webContents.send(IpcChannels.clipboardOffer, { kind: 'clear' });
+    }
     if (!win || win.isDestroyed()) {
       return;
     }
@@ -577,6 +646,46 @@ export async function createChatController(options: {
     void created.loadURL(pageUrl);
     win = created;
     return created;
+  }
+
+  function offerClipboard(offer: ClipboardOffer): void {
+    pendingOffer = offer;
+    console.log(`desktop-companion: clipboard-offer kind=${offer.kind}`);
+    open();
+    if (!pageReady) {
+      return;
+    }
+    deliverCopiedOffer();
+    applyContextPose('curious');
+  }
+
+  function deliverCopiedOffer(): void {
+    if (!pendingOffer) {
+      return;
+    }
+    sendToChat(IpcChannels.clipboardOffer, pendingOffer);
+    pendingOffer = null;
+  }
+
+  function applyContextPose(pose: 'curious' | 'attentive' | 'clear'): void {
+    if (pose === 'clear') {
+      options.onEyePreview('CLEAR');
+      shownPresence = '';
+      shownReason = '';
+      publishOverlayPresence();
+      return;
+    }
+    if (session.status().busy || liveCapture()) {
+      return;
+    }
+    if (pose === 'curious') {
+      options.onEyePreview('CURIOUS');
+      return;
+    }
+    options.onEyePreview('CLEAR');
+    options.onPresence('ATTENTIVE');
+    shownPresence = 'ATTENTIVE';
+    shownReason = 'preview';
   }
 
   function publishHistory(lines: readonly ChatLine[]): void {

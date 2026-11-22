@@ -14,6 +14,14 @@ const CLOSE_CHANNEL = 'chat:close';
 const MINIMIZE_CHANNEL = 'chat:minimize';
 const ACTIVITY_CHANNEL = 'chat:activity';
 const CONVERSATION_CHANNEL = 'chat:conversation';
+const CLIPBOARD_OFFER = 'clipboard:offer';
+const CLIPBOARD_DISMISS = 'clipboard:dismiss';
+const CLIPBOARD_POSE = 'clipboard:pose';
+const CLIPBOARD_REQUEST = 'clipboard:request';
+const SELECT_SCREEN = 'chat:select-screen';
+const CONTEXT_SEND = 'chat:send-context';
+const CLIPBOARD_TEXT_LIMIT = 4_000;
+const CLIPBOARD_MESSAGE_LIMIT = 4_800;
 const HISTORY_CHANNEL = 'chat:history';
 const FOCUS_CHANNEL = 'chat:focus';
 const DELTA_CHANNEL = 'chat:delta';
@@ -138,6 +146,35 @@ contextBridge.exposeInMainWorld('chat', {
   notifyConversation(active: boolean): void {
     ipcRenderer.send(CONVERSATION_CHANNEL, active === true);
   },
+  sendContextMessage(text: string): void {
+    if (typeof text !== 'string' || text.length > CLIPBOARD_MESSAGE_LIMIT) {
+      return;
+    }
+    ipcRenderer.send(CONTEXT_SEND, text);
+  },
+  dismissCopiedText(): void {
+    ipcRenderer.send(CLIPBOARD_DISMISS);
+  },
+  requestCopiedText(): void {
+    ipcRenderer.send(CLIPBOARD_REQUEST);
+  },
+  requestScreenSelection(): void {
+    ipcRenderer.send(SELECT_SCREEN);
+  },
+  notifyContextPose(pose: 'curious' | 'attentive' | 'clear'): void {
+    if (pose !== 'curious' && pose !== 'attentive' && pose !== 'clear') {
+      return;
+    }
+    ipcRenderer.send(CLIPBOARD_POSE, pose);
+  },
+  onCopiedText(listener: (offer: { kind: 'clear' | 'empty' } | { kind: 'too-long'; length: number; limit: number } | { kind: 'ready'; text: string }) => void): () => void {
+    return listen(CLIPBOARD_OFFER, (payload) => {
+      const offer = readClipboardOffer(payload);
+      if (offer) {
+        listener(offer);
+      }
+    });
+  },
   async armMicrophone(): Promise<boolean> {
     return (await ipcRenderer.invoke(SPEECH_ARM)) === true;
   },
@@ -256,6 +293,47 @@ interface ChatStatusPayload {
   endpointPreview: string | null;
 }
 
+function inspectClipboardOffer(raw: string):
+  | { kind: 'empty' }
+  | { kind: 'too-long'; length: number; limit: number }
+  | { kind: 'ready'; text: string } {
+  const text = raw.replace(/\u0000/g, '').replace(/\r\n/g, '\n');
+  if (text.trim().length === 0) {
+    return { kind: 'empty' };
+  }
+  if (text.length > CLIPBOARD_TEXT_LIMIT) {
+    return { kind: 'too-long', length: text.length, limit: CLIPBOARD_TEXT_LIMIT };
+  }
+  return { kind: 'ready', text };
+}
+
+function readClipboardOffer(value: unknown):
+  | { kind: 'clear' }
+  | { kind: 'empty' }
+  | { kind: 'too-long'; length: number; limit: number }
+  | { kind: 'ready'; text: string }
+  | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.kind === 'clear' || record.kind === 'empty') {
+    return { kind: record.kind };
+  }
+  if (record.kind === 'too-long') {
+    const length = record.length;
+    if (record.limit !== CLIPBOARD_TEXT_LIMIT || typeof length !== 'number' || !Number.isSafeInteger(length) || length < 1) {
+      return null;
+    }
+    return { kind: 'too-long', length, limit: CLIPBOARD_TEXT_LIMIT };
+  }
+  if (record.kind === 'ready' && typeof record.text === 'string') {
+    const inspected = inspectClipboardOffer(record.text);
+    return inspected.kind === 'ready' ? inspected : null;
+  }
+  return null;
+}
+
 function listen(channel: string, receive: (payload: unknown) => void): () => void {
   const wrapped = (_event: IpcRendererEvent, payload: unknown): void => {
     receive(payload);
@@ -281,7 +359,7 @@ function readHistory(value: unknown): ChatLinePayload[] | null {
     if ((role !== 'user' && role !== 'demo' && role !== 'assistant') || typeof text !== 'string') {
       return null;
     }
-    const limit = role === 'assistant' ? MAX_ASSISTANT_CHARS : MAX_CHAT_CHARS;
+    const limit = role === 'assistant' ? MAX_ASSISTANT_CHARS : role === 'user' ? CLIPBOARD_MESSAGE_LIMIT : MAX_CHAT_CHARS;
     if (text.length === 0 || text.length > limit) {
       return null;
     }

@@ -16,6 +16,8 @@ export type DemoGesture = 'greet' | 'nod' | 'explain';
 export interface ChatLine {
   role: 'user' | 'demo' | 'assistant';
   text: string;
+  /** One confirmed copied-text question. Later turns omit it from the model. */
+  context?: boolean;
 }
 
 export type ChatAcceptance =

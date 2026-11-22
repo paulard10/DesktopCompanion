@@ -54,10 +54,33 @@
           <button type="button" id="tts-stop">Stop speech</button>
         </div>
         <p id="thinking" class="thinking" hidden aria-live="polite">Thinking…</p>
+        <section id="copied" class="copied" hidden>
+          <div class="copied-bar">
+            <p>Copied text</p>
+            <button type="button" id="copied-close">Close</button>
+          </div>
+          <p id="copied-note" class="copied-note" hidden></p>
+          <textarea id="copied-text" rows="3" spellcheck="false" aria-label="Text to send"></textarea>
+          <div id="copied-actions" class="copied-actions">
+            <button type="button" id="copied-explain" aria-pressed="false">Explain</button>
+            <button type="button" id="copied-summarize" aria-pressed="false">Summarize</button>
+            <button type="button" id="copied-translate" aria-pressed="false">Translate</button>
+            <button type="button" id="copied-ask" aria-pressed="false">Ask anything</button>
+          </div>
+          <input id="copied-question" type="text" maxlength="500" placeholder="Ask about this text" hidden />
+          <button type="button" id="copied-send" class="send" disabled>Send</button>
+        </section>
         <form id="composer" class="composer">
           <label class="field" for="draft">Message</label>
           <textarea id="draft" maxlength="500" rows="2" placeholder="Write a message" title="Enter sends. Shift+Enter adds a line. Esc stops a reply."></textarea>
           <div class="actions">
+            <button type="button" id="attach" class="attach" aria-label="Add context" aria-expanded="false" aria-haspopup="menu" title="Ask about copied text or a screen area">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </button>
+            <div id="attach-menu" class="attach-menu" hidden role="menu">
+              <button type="button" id="attach-copied" role="menuitem">Ask about copied text</button>
+              <button type="button" id="attach-screen" role="menuitem">Select screen area</button>
+            </div>
             <button type="button" id="mic" class="mic" aria-label="Tap to record" title="Click to start. Click again to transcribe. Nothing is sent until you press Send.">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0v-5a3 3 0 0 0-3-3Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 11.5a5 5 0 0 0 10 0M12 16.5V20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
             </button>

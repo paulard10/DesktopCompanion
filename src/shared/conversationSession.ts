@@ -3,6 +3,8 @@
 export interface SessionLine {
   role: 'user' | 'demo' | 'assistant';
   text: string;
+  /** One confirmed copied-text question. Later turns omit it from the model. */
+  context?: boolean;
 }
 
 export interface SessionMessage {
@@ -94,7 +96,7 @@ export function createConversationSession(options: {
 }): {
   history(): readonly SessionLine[];
   status(): PublicStatus;
-  send(text: string): Promise<void>;
+  send(text: string, delivery?: { context?: boolean }): Promise<void>;
   stop(): void;
   reset(): void;
   setProvider(provider: string): 'saved' | 'rejected';
@@ -239,9 +241,11 @@ export function createConversationSession(options: {
         publish();
       }
     },
-    async send(text: string): Promise<void> {
+    async send(text: string, delivery?: { context?: boolean }): Promise<void> {
+      const context = delivery?.context === true;
+      const cap = context ? 4_800 : 500;
       const trimmed = text.trim();
-      if (trimmed.length === 0 || trimmed.length > 500) {
+      if (trimmed.length === 0 || trimmed.length > cap) {
         return;
       }
       if (busy) {
@@ -283,7 +287,7 @@ export function createConversationSession(options: {
       notice = null;
       usage = null;
       stopState.reason = null;
-      const userLine: SessionLine = { role: 'user', text: trimmed };
+      const userLine: SessionLine = context ? { role: 'user', text: trimmed, context: true } : { role: 'user', text: trimmed };
       history = [...history, userLine].slice(-maxLines);
       presence = 'THINKING';
       publish();
