@@ -15,6 +15,8 @@ import {
 import { createChromiumTtsProvider } from './chromiumTtsProvider.ts';
 import { SpeechCapture } from './speechCapture.ts';
 import { mountCopiedText } from './copiedTextPanel.ts';
+import { recognizeWindowsAction } from '../shared/windowsAction';
+import { mountWindowsAction } from './windowsActionCard';
 
 declare global {
   interface ImportMeta {
@@ -77,6 +79,7 @@ const voicePhase = document.querySelector<HTMLElement>('#voice-phase');
 
 const bridge = window.chat;
 let beforeHide = (): void => {};
+let dismissWindowsAction = (): void => {};
 if (closeButton && bridge) {
   closeButton.addEventListener('click', () => {
     beforeHide();
@@ -607,6 +610,7 @@ if (
     void speech.start();
   };
   const endConversation = (): void => {
+    dismissWindowsAction();
     liveConversation = false;
     allowResume = false;
     awaitingConfirm = false;
@@ -802,6 +806,18 @@ if (
     setAttachOpen(false);
   });
 
+  const windowsAction = mountWindowsAction(document, bridge, {
+    onShow() {
+      awaitingConfirm = true;
+      renderVoice();
+    },
+    onDismiss() {
+      awaitingConfirm = false;
+      renderVoice();
+    },
+  });
+  dismissWindowsAction = () => windowsAction.dismiss();
+
   const refreshCopied = mountCopiedText(document, bridge, {
     busy: () => generating,
     onAuthorize() {
@@ -820,6 +836,21 @@ if (
     if (generating || !validated.ok) {
       return;
     }
+    const proposal = recognizeWindowsAction(validated.text);
+    if (proposal) {
+      voiceReplyPending = false;
+      noteCapture('CLEAR');
+      composer.value = '';
+      refreshSend();
+      windowsAction.propose(proposal);
+      bridge.notifyActionPose('thinking');
+      window.setTimeout(() => {
+        if (windowsAction.isPending()) bridge.notifyActionPose('curious');
+      }, 220);
+      composer.focus();
+      return;
+    }
+    dismissWindowsAction();
     awaitingConfirm = false;
     if (ttsSettings.enabled && (voiceReplyPending || liveConversation)) {
       voice.arm();
@@ -855,6 +886,7 @@ if (
   });
 
   clearButton.addEventListener('click', () => {
+    dismissWindowsAction();
     tts.stop();
     speech.cancel();
     voice.apply('reset');
@@ -987,6 +1019,7 @@ if (
   for (const input of document.querySelectorAll<HTMLInputElement>('input[name="provider"]')) {
     input.addEventListener('change', () => {
       if (input.checked) {
+        dismissWindowsAction();
         bridge.setProvider(input.value === 'qwen' ? 'qwen' : 'demo');
       }
     });

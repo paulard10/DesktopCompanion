@@ -70,6 +70,17 @@
           <input id="copied-question" type="text" maxlength="500" placeholder="Ask about this text" hidden />
           <button type="button" id="copied-send" class="send" disabled>Send</button>
         </section>
+        <section id="windows-action" class="action-card" hidden>
+          <p id="windows-action-title"></p>
+          <textarea id="windows-action-note" rows="3" maxlength="4000" spellcheck="false" aria-label="Note" hidden></textarea>
+          <p id="windows-action-destination" class="action-destination" hidden></p>
+          <div class="action-card-buttons">
+            <button type="button" id="windows-action-choose" hidden>Choose destination</button>
+            <button type="button" id="windows-action-confirm" class="send">Confirm</button>
+            <button type="button" id="windows-action-overwrite" hidden>Overwrite</button>
+            <button type="button" id="windows-action-cancel">Cancel</button>
+          </div>
+        </section>
         <form id="composer" class="composer">
           <label class="field" for="draft">Message</label>
           <textarea id="draft" maxlength="500" rows="2" placeholder="Write a message" title="Enter sends. Shift+Enter adds a line. Esc stops a reply."></textarea>

@@ -30,6 +30,7 @@ export type EyeCue = (typeof EYE_CUES)[number];
 
 export const EYE_PREVIEW_CUES = [
   'CURIOUS',
+  'SURPRISED',
   'SLEEPING',
   'BLINK',
   'WAKING',

@@ -204,7 +204,7 @@ export function createCharacterDirector(): CharacterDirector {
         preview = null;
         return;
       }
-      if (cue === 'CURIOUS' || cue === 'SLEEPING') {
+      if (cue === 'CURIOUS' || cue === 'SURPRISED' || cue === 'SLEEPING') {
         preview = cue;
       }
     },

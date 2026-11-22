@@ -1,5 +1,6 @@
 import type { ClipboardOffer } from './clipboardContext.js';
 import type { EyePreviewCue } from './faceExpression.js';
+import type { NotePickResult, NoteSaveResult, OpenActionResult, OpenTarget, WindowsActionPose } from './windowsAction.js';
 
 export const IpcChannels = {
   frameReady: 'overlay:frame-ready',
@@ -23,6 +24,12 @@ export const IpcChannels = {
   clipboardRequest: 'clipboard:request',
   chatSelectScreen: 'chat:select-screen',
   chatSendContext: 'chat:send-context',
+  windowsOpen: 'windows:open',
+  windowsPickNote: 'windows:pick-note',
+  windowsSaveNote: 'windows:save-note',
+  windowsCancel: 'windows:cancel',
+  windowsCleared: 'windows:cleared',
+  windowsPose: 'windows:pose',
   chatHistory: 'chat:history',
   chatFocus: 'chat:focus',
   chatDelta: 'chat:delta',
@@ -148,6 +155,12 @@ export interface ChatBridge {
   requestScreenSelection: () => void;
   notifyContextPose: (pose: 'curious' | 'attentive' | 'clear') => void;
   onCopiedText: (listener: (offer: ClipboardOffer) => void) => () => void;
+  openWindowsApp: (target: OpenTarget, requestId: string) => Promise<OpenActionResult>;
+  pickNoteDestination: (text: string) => Promise<NotePickResult>;
+  saveNote: (token: string, text: string, overwrite: boolean) => Promise<NoteSaveResult>;
+  cancelWindowsAction: () => void;
+  notifyActionPose: (pose: WindowsActionPose) => void;
+  onWindowsCleared: (listener: () => void) => () => void;
   stopGeneration: () => void;
   saveKey: (key: string) => void;
   removeKey: () => void;

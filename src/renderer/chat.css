@@ -345,7 +345,7 @@ textarea::placeholder { color: #8d877d; }
   border: 1px solid #d9d2c6;
 }
 
-.conversation-live, .voice-phase, .speech-controls, .speech-staged, .tts-bar, .thinking, .notice, .speech-error, .copied {
+.conversation-live, .voice-phase, .speech-controls, .speech-staged, .tts-bar, .thinking, .notice, .speech-error, .copied, .action-card {
   margin: 8px 12px 0;
 }
 
@@ -404,6 +404,52 @@ textarea::placeholder { color: #8d877d; }
 }
 
 #copied-send { width: 100%; }
+
+.action-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e4ddd2;
+  border-radius: 16px;
+  background: #fffdf8;
+}
+
+.action-card[hidden] { display: none; }
+
+.action-card p { margin: 0; font-weight: 650; }
+
+.action-destination { color: #5e584f; font-size: 13px; font-weight: 450; word-break: break-word; }
+
+#windows-action-note {
+  width: 100%;
+  min-height: 64px;
+  max-height: 120px;
+  resize: none;
+  border: 1px solid #e4ddd2;
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px;
+}
+
+.action-card-buttons { display: flex; gap: 8px; }
+
+.action-card-buttons button {
+  flex: 1 1 0;
+  height: 36px;
+  border: 1px solid #e4ddd2;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.action-card-buttons button[hidden] { display: none; }
+
+.action-card-buttons .send {
+  background: #14171c;
+  color: #d7ff63;
+  border-color: #14171c;
+}
 
 .conversation-live {
   display: flex;

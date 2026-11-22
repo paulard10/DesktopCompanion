@@ -20,6 +20,13 @@ const CLIPBOARD_POSE = 'clipboard:pose';
 const CLIPBOARD_REQUEST = 'clipboard:request';
 const SELECT_SCREEN = 'chat:select-screen';
 const CONTEXT_SEND = 'chat:send-context';
+const WINDOWS_OPEN = 'windows:open';
+const WINDOWS_PICK_NOTE = 'windows:pick-note';
+const WINDOWS_SAVE_NOTE = 'windows:save-note';
+const WINDOWS_CANCEL = 'windows:cancel';
+const WINDOWS_CLEARED = 'windows:cleared';
+const WINDOWS_POSE = 'windows:pose';
+const NOTE_TEXT_LIMIT = 4_000;
 const CLIPBOARD_TEXT_LIMIT = 4_000;
 const CLIPBOARD_MESSAGE_LIMIT = 4_800;
 const HISTORY_CHANNEL = 'chat:history';
@@ -167,6 +174,49 @@ contextBridge.exposeInMainWorld('chat', {
     }
     ipcRenderer.send(CLIPBOARD_POSE, pose);
   },
+  async openWindowsApp(
+    target: 'calculator' | 'notepad' | 'explorer',
+    requestId: string,
+  ): Promise<{ ok: true } | { ok: false; reason: 'invalid' | 'duplicate' | 'failed' }> {
+    if (!isWindowsTarget(target) || !isActionRequestId(requestId)) {
+      return { ok: false, reason: 'invalid' };
+    }
+    const result = await ipcRenderer.invoke(WINDOWS_OPEN, target, requestId);
+    return readOpenResult(result);
+  },
+  async pickNoteDestination(text: string): Promise<
+    | { ok: true; token: string; fileName: string; destination: string; exists: boolean }
+    | { ok: false; reason: 'invalid' | 'cancelled' | 'busy' }
+  > {
+    if (!isNoteText(text)) {
+      return { ok: false, reason: 'invalid' };
+    }
+    const result = await ipcRenderer.invoke(WINDOWS_PICK_NOTE, text);
+    return readNotePick(result);
+  },
+  async saveNote(
+    token: string,
+    text: string,
+    overwrite: boolean,
+  ): Promise<{ ok: true; fileName: string } | { ok: false; reason: 'missing' | 'exists' | 'invalid' | 'failed' | 'busy' | 'cancelled' }> {
+    if (!isNoteToken(token) || !isNoteText(text) || typeof overwrite !== 'boolean') {
+      return { ok: false, reason: 'missing' };
+    }
+    const result = await ipcRenderer.invoke(WINDOWS_SAVE_NOTE, { token, text, overwrite });
+    return readNoteSave(result);
+  },
+  cancelWindowsAction(): void {
+    ipcRenderer.send(WINDOWS_CANCEL);
+  },
+  notifyActionPose(pose: 'thinking' | 'curious' | 'happy' | 'surprised' | 'clear'): void {
+    if (pose !== 'thinking' && pose !== 'curious' && pose !== 'happy' && pose !== 'surprised' && pose !== 'clear') {
+      return;
+    }
+    ipcRenderer.send(WINDOWS_POSE, pose);
+  },
+  onWindowsCleared(listener: () => void): () => void {
+    return listen(WINDOWS_CLEARED, () => listener());
+  },
   onCopiedText(listener: (offer: { kind: 'clear' | 'empty' } | { kind: 'too-long'; length: number; limit: number } | { kind: 'ready'; text: string }) => void): () => void {
     return listen(CLIPBOARD_OFFER, (payload) => {
       const offer = readClipboardOffer(payload);
@@ -291,6 +341,67 @@ interface ChatStatusPayload {
     totalTokens: number | null;
   } | null;
   endpointPreview: string | null;
+}
+
+function isWindowsTarget(value: unknown): value is 'calculator' | 'notepad' | 'explorer' {
+  return value === 'calculator' || value === 'notepad' || value === 'explorer';
+}
+
+function isActionRequestId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-z0-9]{16,32}$/.test(value);
+}
+
+function isNoteToken(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
+}
+
+function isNoteText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= NOTE_TEXT_LIMIT;
+}
+
+function readOpenResult(value: unknown): { ok: true } | { ok: false; reason: 'invalid' | 'duplicate' | 'failed' } {
+  if (!value || typeof value !== 'object') return { ok: false, reason: 'failed' };
+  const record = value as Record<string, unknown>;
+  if (record.ok === true) return { ok: true };
+  const reason = record.reason === 'invalid' || record.reason === 'duplicate' || record.reason === 'failed' ? record.reason : 'failed';
+  return { ok: false, reason };
+}
+
+function readNotePick(value: unknown):
+  | { ok: true; token: string; fileName: string; destination: string; exists: boolean }
+  | { ok: false; reason: 'invalid' | 'cancelled' | 'busy' } {
+  if (!value || typeof value !== 'object') return { ok: false, reason: 'invalid' };
+  const record = value as Record<string, unknown>;
+  if (
+    record.ok === true &&
+    isNoteToken(record.token) &&
+    typeof record.fileName === 'string' &&
+    record.fileName.length > 0 &&
+    record.fileName.length <= 120 &&
+    typeof record.destination === 'string' &&
+    record.destination.length > 0 &&
+    record.destination.length <= 240 &&
+    typeof record.exists === 'boolean'
+  ) {
+    return { ok: true, token: record.token, fileName: record.fileName, destination: record.destination, exists: record.exists };
+  }
+  const reason = record.reason === 'cancelled' || record.reason === 'busy' || record.reason === 'invalid' ? record.reason : 'invalid';
+  return { ok: false, reason };
+}
+
+function readNoteSave(value: unknown):
+  | { ok: true; fileName: string }
+  | { ok: false; reason: 'missing' | 'exists' | 'invalid' | 'failed' | 'busy' | 'cancelled' } {
+  if (!value || typeof value !== 'object') return { ok: false, reason: 'failed' };
+  const record = value as Record<string, unknown>;
+  if (record.ok === true && typeof record.fileName === 'string' && record.fileName.length > 0 && record.fileName.length <= 120) {
+    return { ok: true, fileName: record.fileName };
+  }
+  const reason = record.reason === 'missing' || record.reason === 'exists' || record.reason === 'invalid'
+    || record.reason === 'failed' || record.reason === 'busy' || record.reason === 'cancelled'
+    ? record.reason
+    : 'failed';
+  return { ok: false, reason };
 }
 
 function inspectClipboardOffer(raw: string):

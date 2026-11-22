@@ -9,6 +9,8 @@ import { isEyePreviewCue, type EyePreviewCue } from '../shared/faceExpression.js
 import { isPresenceName } from '../shared/presence.js';
 import { isContextMessage, type ClipboardOffer } from '../shared/clipboardContext.js';
 import { readCopiedText } from './clipboardText.js';
+import { attachWindowsActionIpc } from './windowsActions.js';
+import type { WindowsActionPose } from '../shared/windowsAction.js';
 import { IpcChannels } from '../shared/ipc.js';
 import { validateApiKey } from '../shared/keyVault.js';
 import { classifyProviderHttp, providerFailureMessage } from '../shared/providerErrors.js';
@@ -78,6 +80,7 @@ export async function createChatController(options: {
   let captureBusy = false;
   let conversationHold = false;
   let pendingOffer: ClipboardOffer | null = null;
+  let actionTimer: ReturnType<typeof setTimeout> | null = null;
   const liveCapture = (): boolean => ttsSpeaking || voicePose === 'ATTENTIVE' || voicePose === 'THINKING';
   const publishOverlayPresence = (): void => {
     const current = session.status();
@@ -428,6 +431,66 @@ export async function createChatController(options: {
     }
     console.log(`desktop-companion: send-disabled=${payload}`);
   };
+  const clearActionTimer = (): void => {
+    if (actionTimer) {
+      clearTimeout(actionTimer);
+      actionTimer = null;
+    }
+  };
+  const applyActionPose = (pose: WindowsActionPose): void => {
+    clearActionTimer();
+    if (pose === 'clear') {
+      options.onEyePreview('CLEAR');
+      if (shownReason === 'preview') {
+        shownPresence = '';
+        shownReason = '';
+        publishOverlayPresence();
+      }
+      return;
+    }
+    if (pose === 'curious') {
+      options.onEyePreview('CURIOUS');
+      return;
+    }
+    if (pose === 'surprised') {
+      options.onEyePreview('SURPRISED');
+      actionTimer = setTimeout(() => {
+        actionTimer = null;
+        options.onEyePreview('CLEAR');
+        publishOverlayPresence();
+      }, 900);
+      return;
+    }
+    if (pose === 'thinking' || pose === 'happy') {
+      options.onEyePreview('CLEAR');
+      options.onPresence(pose === 'thinking' ? 'THINKING' : 'HAPPY');
+      if (pose === 'happy') options.onGesture('greet');
+      shownPresence = pose === 'thinking' ? 'THINKING' : 'HAPPY';
+      shownReason = 'preview';
+      if (pose === 'happy') {
+        actionTimer = setTimeout(() => {
+          actionTimer = null;
+          if (shownPresence === 'HAPPY' && shownReason === 'preview') {
+            shownPresence = '';
+            shownReason = '';
+            publishOverlayPresence();
+          }
+        }, 1200);
+      }
+    }
+  };
+  const windows = attachWindowsActionIpc({
+    isChatFrame: (event) => isChatFrame(event, options.dev),
+    getParent: () => (win && !win.isDestroyed() ? win : null),
+    onPose: applyActionPose,
+  });
+  const cancelWindowsAction = (): void => {
+    windows.cancel();
+    clearActionTimer();
+    if (win && !win.isDestroyed() && pageReady) {
+      win.webContents.send(IpcChannels.windowsCleared);
+    }
+  };
   const onVoicePresence = (event: IpcMainEvent, payload: unknown): void => {
     if (!speechFrame(event)) {
       return;
@@ -474,6 +537,7 @@ export async function createChatController(options: {
     reposition,
     offerClipboard,
     stopVoice(): void {
+      cancelWindowsAction();
       speech.cancel();
       captureBusy = false;
       conversationHold = false;
@@ -509,6 +573,8 @@ export async function createChatController(options: {
       captureBusy = false;
       conversationHold = false;
       pendingOffer = null;
+      windows.cancel();
+      windows.dispose();
       publishOverlayPresence();
       await speech.waitForIdle();
       session.stop();
@@ -567,6 +633,7 @@ export async function createChatController(options: {
   }
 
   function hide(): void {
+    cancelWindowsAction();
     session.stop();
     speech.cancel();
     pendingOffer = null;

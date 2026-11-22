@@ -104,12 +104,13 @@ contextBridge.exposeInMainWorld('companion', {
   },
   onEyePreview(
     listener: (
-      cue: 'CURIOUS' | 'SLEEPING' | 'BLINK' | 'WAKING' | 'PROBE_LEFT' | 'PROBE_RIGHT' | 'PROBE_ANTENNA' | 'PROBE_BODY' | 'PROBE_RESET' | 'CLEAR',
+      cue: 'CURIOUS' | 'SURPRISED' | 'SLEEPING' | 'BLINK' | 'WAKING' | 'PROBE_LEFT' | 'PROBE_RIGHT' | 'PROBE_ANTENNA' | 'PROBE_BODY' | 'PROBE_RESET' | 'CLEAR',
     ) => void,
   ): () => void {
     const wrapped = (_event: IpcRendererEvent, payload: unknown): void => {
       if (
         payload === 'CURIOUS' ||
+        payload === 'SURPRISED' ||
         payload === 'SLEEPING' ||
         payload === 'BLINK' ||
         payload === 'WAKING' ||
