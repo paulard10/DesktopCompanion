@@ -8,6 +8,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import { COMPANION_LAYOUT } from '../../shared/companionLayout';
+import { SLEEP_FRAME_MS } from '../../shared/behavior';
 import type { RobotGesture } from '../../shared/gesturePose';
 import type { CursorSample } from '../../shared/ipc';
 import {
@@ -96,23 +97,45 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
 
   let loopAttached = false;
   let disposed = false;
+  let clockTimer = 0;
+  let clockFrame = 0;
 
-  const frame = (): void => {
+  const stopClock = (): void => {
+    if (clockTimer !== 0) {
+      window.clearTimeout(clockTimer);
+      clockTimer = 0;
+    }
+    if (clockFrame !== 0) {
+      window.cancelAnimationFrame(clockFrame);
+      clockFrame = 0;
+    }
+  };
+
+  const pump = (): void => {
+    stopClock();
     if (disposed || document.hidden) {
       return;
     }
-    // Windows can change DPR while keeping the DIP bounds unchanged. Reuse the
-    // existing frame callback; resize only when the capped ratio changes.
-    if (renderer.getPixelRatio() !== Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO)) {
-      resize();
-    }
-    const now = performance.now();
-    const next = director.step(now);
-    if (!next.render) {
-      return;
-    }
-    avatar.apply(next.pose, now);
-    renderer.render(scene, camera);
+    clockFrame = window.requestAnimationFrame(() => {
+      clockFrame = 0;
+      if (disposed || document.hidden) {
+        return;
+      }
+      if (renderer.getPixelRatio() !== Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO)) {
+        resize();
+      }
+      const now = performance.now();
+      const next = director.step(now);
+      if (next.render) {
+        avatar.apply(next.pose, now);
+        renderer.render(scene, camera);
+      }
+      if (director.isSleeping()) {
+        clockTimer = window.setTimeout(pump, SLEEP_FRAME_MS);
+        return;
+      }
+      pump();
+    });
   };
 
   const attachLoop = (): void => {
@@ -120,7 +143,7 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
       return;
     }
     loopAttached = true;
-    renderer.setAnimationLoop(frame);
+    pump();
   };
 
   const detachLoop = (): void => {
@@ -128,7 +151,7 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
       return;
     }
     loopAttached = false;
-    renderer.setAnimationLoop(null);
+    stopClock();
   };
 
   resize();
@@ -138,17 +161,29 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
     }) ?? (() => {});
   const stopGesture =
     window.companion?.onGesture((gesture) => {
+      const wasSleeping = director.isSleeping();
       director.playGesture(gesture, performance.now());
+      if (wasSleeping && loopAttached) {
+        pump();
+      }
     }) ?? (() => {});
   const stopBehavior =
     window.companion?.onBehavior((command) => {
       const now = performance.now();
       if (command === 'wake') {
+        const wasSleeping = director.isSleeping();
         director.wake(now);
+        if (wasSleeping) {
+          pump();
+        }
         return;
       }
       if (command === 'engage') {
+        const wasSleeping = director.isSleeping();
         director.engage(now);
+        if (wasSleeping) {
+          pump();
+        }
         return;
       }
       if (command === 'linger') {
@@ -227,7 +262,11 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
       avatar.pulse(nowMs);
     },
     wake(nowMs: number): void {
+      const wasSleeping = director.isSleeping();
       director.wake(nowMs);
+      if (wasSleeping && loopAttached) {
+        pump();
+      }
     },
     sleep(nowMs: number): void {
       director.sleep(nowMs);
@@ -236,7 +275,11 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
       director.noteCursor(sample);
     },
     playGesture(name: RobotGesture, nowMs: number): void {
+      const wasSleeping = director.isSleeping();
       director.playGesture(name, nowMs);
+      if (wasSleeping && loopAttached) {
+        pump();
+      }
     },
     isAwake(): boolean {
       return director.isAwake();

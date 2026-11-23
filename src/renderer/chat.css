@@ -439,10 +439,15 @@ textarea::placeholder { color: #8d877d; }
   padding: 8px;
 }
 
-.action-card-buttons { display: flex; gap: 8px; }
+.action-card-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 
 .action-card-buttons button {
-  flex: 1 1 0;
+  flex: 1 1 7.5rem;
+  min-width: 0;
   height: 36px;
   border: 1px solid #e4ddd2;
   border-radius: 12px;
@@ -649,10 +654,12 @@ textarea::placeholder { color: #8d877d; }
 }
 
 .settings-title {
-  margin: 0 0 8px;
+  margin: 16px 0 8px;
   font-size: 13px;
   font-weight: 650;
 }
+
+.settings > .settings-title:first-of-type { margin-top: 0; }
 
 .option {
   display: flex;

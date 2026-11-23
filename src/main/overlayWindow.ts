@@ -2,6 +2,8 @@ import path from 'node:path';
 import { BrowserWindow, ipcMain, screen, systemPreferences, type IpcMainEvent } from 'electron';
 import { FOLLOW, enableFollow, followInputSuppressed, holdFollow, initialFollow, observeFollowCursor, planFollow, stepFollow, type FollowView } from '../shared/cursorFollow.js';
 import {
+  CURSOR_IDLE_MARGIN_DIP,
+  CURSOR_IDLE_POLL_MS,
   CURSOR_POLL_MS,
   INITIAL_POINTER_STATE,
   decidePointerMode,
@@ -142,6 +144,7 @@ export function createOverlayWindow(options: {
   let appliedMode: PointerMode = 'passthrough';
   let pointerState: PointerDecisionState = INITIAL_POINTER_STATE;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let pollInterval = 0;
   let travelTimer: ReturnType<typeof setInterval> | null = null;
   let travel: TravelState = createTravel(bounds, { x: bounds.x, y: bounds.y });
   let travelAnnounced = false;
@@ -475,7 +478,7 @@ export function createOverlayWindow(options: {
       return;
     }
     sampleAndApply();
-    pollTimer = setInterval(sampleAndApply, CURSOR_POLL_MS);
+    armCursorPoll(CURSOR_POLL_MS);
   }
 
   function stopPolling(): void {
@@ -484,6 +487,33 @@ export function createOverlayWindow(options: {
     }
     clearInterval(pollTimer);
     pollTimer = null;
+    pollInterval = 0;
+  }
+
+  function armCursorPoll(intervalMs: number): void {
+    if (pollTimer && pollInterval === intervalMs) {
+      return;
+    }
+    if (pollTimer) {
+      clearInterval(pollTimer);
+    }
+    pollInterval = intervalMs;
+    pollTimer = setInterval(sampleAndApply, intervalMs);
+  }
+
+  function desiredCursorPoll(
+    windowBounds: { x: number; y: number; width: number; height: number },
+    cursor: { x: number; y: number },
+  ): number {
+    const moving = follow.enabled || travel.phase !== 'idle' || (dock !== null && dock.phase !== 'docked');
+    if (!robotAsleep() || moving) {
+      return CURSOR_POLL_MS;
+    }
+    const near = cursor.x >= windowBounds.x - CURSOR_IDLE_MARGIN_DIP
+      && cursor.x < windowBounds.x + windowBounds.width + CURSOR_IDLE_MARGIN_DIP
+      && cursor.y >= windowBounds.y - CURSOR_IDLE_MARGIN_DIP
+      && cursor.y < windowBounds.y + windowBounds.height + CURSOR_IDLE_MARGIN_DIP;
+    return near ? CURSOR_POLL_MS : CURSOR_IDLE_POLL_MS;
   }
 
   function readWorkArea() {
@@ -851,7 +881,11 @@ export function createOverlayWindow(options: {
     applyMode(effective.mode, effective.reason);
     publishDesktopCursor({ cursor, at: sampleAt, avatarOwnsPointer: visible && effective.mode === 'interactive' });
     logPointerSample(visible ? observation : null, cursor, windowBounds, effective.mode, effective.reason, now);
-    if (visible && !win.webContents.isDestroyed()) {
+    const poll = desiredCursorPoll(windowBounds, cursor);
+    if (pollTimer) {
+      armCursorPoll(poll);
+    }
+    if (poll !== CURSOR_IDLE_POLL_MS && visible && !win.webContents.isDestroyed()) {
       win.webContents.send(IpcChannels.cursorSample, {
         x: cursor.x,
         y: cursor.y,

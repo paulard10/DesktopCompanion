@@ -230,7 +230,7 @@ test('main explicitly arbitrates wandering versus follow without persisting it o
   assert.doesNotMatch(follow, /preferenceStore|\.wake\(|fetch\(|qwen|transcribe/);
   assert.doesNotMatch(readFileSync(path.join(root, 'src/shared/userPreferences.ts'), 'utf8'), /[Ff]ollow/);
   const overlay = readFileSync(path.join(root, 'src/main/overlayWindow.ts'), 'utf8');
-  assert.equal((overlay.match(/setInterval\(sampleAndApply, CURSOR_POLL_MS\)/g) ?? []).length, 1);
+  assert.equal((overlay.match(/setInterval\(sampleAndApply, intervalMs\)/g) ?? []).length, 1);
   assert.equal((overlay.match(/setInterval\(tickTravel, 32\)/g) ?? []).length, 1);
   assert.equal((overlay.match(/win\.setBounds\(\{ x: nextX/g) ?? []).length, 1);
   assert.equal((overlay.match(/new BrowserWindow\(/g) ?? []).length, 1);

@@ -26,6 +26,9 @@ export const SAMPLE_STALE_MS = 250;
 
 /** Cursor poll while the overlay is visible. Main process only. */
 export const CURSOR_POLL_MS = 16;
+/** Asleep and away from the robot. Click-through returns to the fast poll inside the margin. */
+export const CURSOR_IDLE_POLL_MS = 80;
+export const CURSOR_IDLE_MARGIN_DIP = 96;
 
 export interface DipPoint {
   x: number;

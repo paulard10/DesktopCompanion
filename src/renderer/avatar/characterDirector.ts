@@ -65,6 +65,7 @@ export interface CharacterDirector {
   setEyePreview(cue: EyePreviewCue, now: number): void;
   setTravel(moving: boolean): void;
   isAwake(): boolean;
+  isSleeping(): boolean;
   onPhase(listener: (phase: Phase) => void): void;
   step(now: number): CharacterFrame;
 }
@@ -215,6 +216,9 @@ export function createCharacterDirector(): CharacterDirector {
     },
     isAwake(): boolean {
       return behavior.phase === 'WAKING' || behavior.phase === 'IDLE' || behavior.phase === 'TRACKING';
+    },
+    isSleeping(): boolean {
+      return behavior.phase === 'SLEEPING';
     },
     onPhase(listener: (phase: Phase) => void): void {
       phaseListener = listener;

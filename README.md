@@ -160,7 +160,20 @@ ggml-tiny.bin
 
 These are the pinned whisper.cpp 1.9.2 Windows x64 CPU binaries and the multilingual Tiny model, `ggml-tiny.bin`, not the English-only file. The app checks each file's SHA-256 and refuses to start if one is missing or different. The expected hashes are in `src/main/localSpeech.ts`.
 
-Transcription runs for one utterance at a time, on two CPU threads, for at most 20 seconds of audio. It needs at least 1,024 MB of free memory. On the development laptop, a short clip takes a few seconds. Tiny can miss words, especially in noise. Auto, ES, and EN select the language passed to Whisper.
+Transcription runs for one utterance at a time, on two CPU threads, for at most 20 seconds of audio. It needs at least 1,024 MB of free memory before it starts. That floor was not lowered. On the development laptop, a short clip takes a few seconds. Tiny can miss words, especially in noise. Auto, ES, and EN select the language passed to Whisper.
+
+## Performance
+
+While the robot is asleep it draws a breathing frame about every 80 ms, instead of on every display refresh. The cursor is also sampled more slowly when the pointer is far from the window. Waking, docking, gestures, and an awake robot still use the display rate. When the pointer comes near the robot, cursor sampling returns to the fast interval so click-through stays responsive.
+
+The numbers below are from `npm run dev`, not a packaged build, on one Windows 11 laptop: Intel Core i5-1235U, 8 GB of RAM, and Intel Iris Xe. Follow Cursor and voice were not part of these samples, and this was not a long-running leak test.
+
+- Asleep at Home, after the session had settled: about 1.0–1.3% of total CPU, and about 229–230 MB of Electron working set. Private memory stayed near 252 MB across the two sleep samples and did not climb.
+- The same kind of sleep measurement before this change was about 2.99% of total CPU and about 220 MB working set.
+- A fresh launch can report a larger working set until Windows trims it. One fresh sample was about 445 MB and later settled to the sleeping figure above.
+- Awake and idle, in short samples, was about 3.8–4.0% of total CPU. Chat open was higher.
+
+During that session, free memory stayed under 1,024 MB, so Whisper would have refused to start. Chrome, Cursor, and other open programs accounted for most of that use. The companion asleep was about 230 MB of the 8 GB.
 
 ## Known limitations
 
@@ -169,7 +182,8 @@ Transcription runs for one utterance at a time, on two CPU threads, for at most 
 - Follow Cursor stays off until you enable it.
 - The robot sleeps after about two minutes of quiet. Meaningful follow, chat, screen selection, and an in-progress Qwen request postpone that. Cursor movement does not wake a sleeping robot. If Home is hidden, it sleeps in place.
 - Click-through can fail against an elevated window. The tray has a temporary whole-window recovery switch for that case.
-- Voice needs the local Whisper files described above and a Windows voice for Spanish or English. Recordings are not stored. Transcription can refuse to start when free memory is below 1,024 MB.
+- Voice needs the local Whisper files described above and a Windows voice for Spanish or English. Recordings are not stored. Transcription refuses to start when free memory is below 1,024 MB. On an 8 GB PC that is already busy, that free memory may not be available even though the companion itself is not leaking.
+- Sleeping uses less CPU than a full-speed frame loop, and the robot still draws a slow breathing frame. Awake animation stays at the display rate. The performance figures above are one development PC. They do not include Follow Cursor, a voice session, or a long-running leak test.
 - Copied text is plain text only, up to 4,000 characters, and only after you choose the command. There is no clipboard watcher, no image or file reading, and no automatic send.
 - Windows actions are Calculator, Notepad, File Explorer, and one plain-text note. The request has to be the whole message, in Spanish or English. A note is a `.txt` file you choose in the save dialog, up to 4,000 characters, and an existing file is replaced only after a separate overwrite confirmation. **Save as note** uses that same save step on a finished chat reply. Screen Vision responses are not yet supported.
 - Qwen calls depend on your key, quota, and the provider being reachable. The app does not switch models or retry a failed call.
