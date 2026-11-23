@@ -12,9 +12,9 @@ export type OpenTarget = (typeof OPEN_TARGETS)[number];
 export type WindowsProposal =
   | { kind: 'open'; target: OpenTarget }
   | { kind: 'note'; text: string }
-  | { kind: 'refused'; reason: 'too-long' };
+  | { kind: 'refused'; reason: 'too-long' | 'unsuitable' };
 
-export type WindowsActionPose = 'thinking' | 'curious' | 'happy' | 'surprised' | 'clear';
+export type WindowsActionPose = 'thinking' | 'curious' | 'attentive' | 'happy' | 'surprised' | 'clear';
 
 export interface NoteDestination {
   filePath: string;
@@ -100,6 +100,27 @@ export function recognizeWindowsAction(value: unknown): WindowsProposal | null {
   const opened = OPEN_COMMAND.exec(command);
   const target = opened ? openTarget(opened[1] ?? '') : null;
   return target ? { kind: 'open', target } : null;
+}
+
+/**
+ * A completed reply is note content. It is never read as a Windows command.
+ * Empty text is ignored. Text past the note limit is refused whole, not shortened.
+ */
+export function noteProposalFromReply(value: unknown): WindowsProposal | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const text = value.replace(/\u0000/g, '').replace(/\r\n/g, '\n');
+  if (text.trim().length === 0) {
+    return null;
+  }
+  if (text.length > NOTE_TEXT_LIMIT) {
+    return { kind: 'refused', reason: 'too-long' };
+  }
+  if (!readNoteText(text)) {
+    return { kind: 'refused', reason: 'unsuitable' };
+  }
+  return { kind: 'note', text };
 }
 
 export function readNoteText(value: unknown): string | null {

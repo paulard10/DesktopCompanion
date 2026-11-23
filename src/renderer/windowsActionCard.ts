@@ -205,7 +205,9 @@ export function mountWindowsAction(
         ? openPrompt(proposal.target)
         : proposal.kind === 'note'
           ? 'Save this note?'
-          : 'That note is longer than 4,000 characters, so nothing was prepared.';
+          : proposal.reason === 'unsuitable'
+            ? "This reply can't be saved as a plain-text note."
+            : 'That note is longer than 4,000 characters, so nothing was prepared.';
       if (proposal.kind === 'refused') {
         choose.hidden = true;
         confirm.hidden = true;

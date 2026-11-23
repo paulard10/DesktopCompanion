@@ -15,7 +15,7 @@ import {
 import { createChromiumTtsProvider } from './chromiumTtsProvider.ts';
 import { SpeechCapture } from './speechCapture.ts';
 import { mountCopiedText } from './copiedTextPanel.ts';
-import { recognizeWindowsAction } from '../shared/windowsAction';
+import { noteProposalFromReply, recognizeWindowsAction } from '../shared/windowsAction';
 import { mountWindowsAction } from './windowsActionCard';
 
 declare global {
@@ -579,7 +579,7 @@ if (
   };
 
   thread.addEventListener('click', (event) => {
-    if (event.target instanceof Element && event.target.closest('.speak-reply')) return;
+    if (event.target instanceof Element && event.target.closest('.speak-reply, .save-note')) return;
     setSettingsOpen(false);
   });
   thread.addEventListener('scroll', () => {
@@ -1073,6 +1073,20 @@ if (
     if (!(target instanceof HTMLElement)) {
       return;
     }
+    const saveNote = target.closest<HTMLButtonElement>('.save-note');
+    if (saveNote) {
+      if (windowsAction.isPending()) {
+        return;
+      }
+      const reply = saveNote.closest<HTMLLIElement>('.message')?.querySelector('p')?.textContent ?? '';
+      const proposal = noteProposalFromReply(reply);
+      if (!proposal) {
+        return;
+      }
+      windowsAction.propose(proposal);
+      bridge.notifyActionPose(proposal.kind === 'note' ? 'attentive' : 'surprised');
+      return;
+    }
     const button = target.closest<HTMLButtonElement>('.speak-reply');
     if (!button || button.disabled) {
       return;
@@ -1144,6 +1158,14 @@ function renderLine(line: ChatLine, streaming = false): HTMLLIElement {
   if (line.role === 'assistant' || line.role === 'demo') {
     const actions = document.createElement('div');
     actions.className = 'message-actions';
+    if (!streaming && line.text.trim().length > 0) {
+      const save = document.createElement('button');
+      save.type = 'button';
+      save.className = 'save-note';
+      save.textContent = 'Save as note';
+      save.setAttribute('aria-label', 'Save this reply as a note');
+      actions.append(save);
+    }
     const speak = document.createElement('button');
     speak.type = 'button';
     speak.className = 'speak-reply';

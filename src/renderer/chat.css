@@ -554,9 +554,13 @@ textarea::placeholder { color: #8d877d; }
 
 .notice[data-outcome='cancelled'] { color: #5e584f; }
 
-.message-actions { margin-top: 2px; }
+.message-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 2px;
+}
 
-.speak-reply {
+.save-note, .speak-reply {
   border: 0;
   background: transparent;
   color: #6f6a62;

@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   createWindowsActionGate,
+  noteProposalFromReply,
   openPrompt,
   recognizeWindowsAction,
   resolveWindowsExecutable,
@@ -130,4 +131,64 @@ test('actions stay out of Qwen, copied text, and the shell', () => {
   assert.equal(preload.includes('../shared'), false);
   assert.equal(chat.includes('child_process'), false);
   assert.match(read('src/main/chatWindow.ts'), /cancelWindowsAction\(\)/);
+  assert.equal(read('src/renderer/screen-selection.ts').includes('noteProposalFromReply'), false);
+  assert.equal(read('src/renderer/screen-selection.ts').includes('saveNote'), false);
+});
+
+test('a completed reply can be saved as a note and is never a command', async () => {
+  const summary = 'Open Calculator\n\nMañana: the paragraph says the launch is ready.';
+  assert.deepEqual(noteProposalFromReply(summary), { kind: 'note', text: summary });
+  assert.equal(noteProposalFromReply('   '), null);
+  assert.equal(noteProposalFromReply(''), null);
+  const exact = 'a'.repeat(4_000);
+  assert.deepEqual(noteProposalFromReply(exact), { kind: 'note', text: exact });
+  const tooLong = noteProposalFromReply('a'.repeat(4_001));
+  assert.deepEqual(tooLong, { kind: 'refused', reason: 'too-long' });
+  assert.equal(JSON.stringify(tooLong).includes('a'.repeat(20)), false);
+  assert.deepEqual(noteProposalFromReply('hello\u0001'), { kind: 'refused', reason: 'unsuitable' });
+
+  let opens = 0;
+  let writes = 0;
+  const files = new Map<string, string>();
+  const host: WindowsActionHost = {
+    open: async () => {
+      opens += 1;
+      return true;
+    },
+    chooseNoteFile: async () => 'C:\\Notes\\summary.txt',
+    fileExists: async (filePath) => files.has(filePath) ? 'file' : 'missing',
+    writeNote: async (filePath, text, replace) => {
+      if (files.has(filePath) && !replace) return 'exists';
+      writes += 1;
+      files.set(filePath, text);
+      return 'saved';
+    },
+  };
+  const gate = createWindowsActionGate(host, () => token);
+  const proposal = noteProposalFromReply(summary);
+  assert.equal(proposal?.kind, 'note');
+  const picked = await gate.pickNote(proposal && proposal.kind === 'note' ? proposal.text : '');
+  assert.equal(picked.ok, true);
+  gate.cancel();
+  assert.equal(writes, 0);
+  assert.equal(opens, 0);
+  const again = await gate.pickNote(summary);
+  assert.equal(again.ok, true);
+  if (!again.ok) return;
+  const edited = `${summary}\nEdited.`;
+  assert.deepEqual(await gate.saveNote(again.token, edited, false), { ok: true, fileName: 'summary.txt' });
+  assert.equal(files.get('C:\\Notes\\summary.txt'), edited);
+  assert.equal(opens, 0);
+  assert.equal(writes, 1);
+
+  const read = (file: string) => readFileSync(path.join(root, file), 'utf8');
+  const chat = read('src/renderer/chat.ts');
+  const click = chat.slice(chat.indexOf("history.addEventListener('click'"), chat.indexOf('const applyTtsSettings'));
+  assert.match(chat, /className = 'save-note'/);
+  assert.equal(click.includes('noteProposalFromReply'), true);
+  assert.equal(click.includes('recognizeWindowsAction'), false);
+  assert.equal(click.includes('sendMessage'), false);
+  assert.equal(click.includes('openWindowsApp'), false);
+  assert.match(click, /isPending\(\)/);
+  assert.equal(read('src/main/windowsActions.ts').match(/writeFile\(/g)?.length, 1);
 });

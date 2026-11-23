@@ -164,5 +164,5 @@ function launchDetached(exe: string): Promise<boolean> {
 }
 
 function isPose(value: unknown): value is WindowsActionPose {
-  return value === 'thinking' || value === 'curious' || value === 'happy' || value === 'surprised' || value === 'clear';
+  return value === 'thinking' || value === 'curious' || value === 'attentive' || value === 'happy' || value === 'surprised' || value === 'clear';
 }

@@ -14,6 +14,7 @@ Desktop Companion is an Electron overlay: a transparent window, a procedural rob
 - **Chat.** Open it from the badge, a second click on an awake robot, or the tray. The window is a short conversation: messages, one text box, an attachment button, a microphone, and Send. Connection details and extra voice options stay in Settings. Demo mode answers locally and sends nothing over the network.
 - **Ask about copied text.** Copy text in another app, then choose the command from the tray or the chat attachment menu. The chat shows that text. Choose Explain, Summarize, Translate, or Ask anything, review it, and press Send. Copying alone does not open the feature or send anything.
 - **Windows actions.** Ask in chat, or by voice, to open Calculator, Notepad, or File Explorer, or to save a plain-text note. The robot shows the action and waits. Confirm is the only step that runs it.
+- **Save a reply as a note.** A finished chat reply has **Save as note**. Review and edit the text, choose a `.txt` file in the Windows save dialog, then confirm. An existing file needs a separate overwrite confirmation. A Screen Vision answer is not saved from the selection window.
 - **Voice.** Click the microphone to record and click it again to transcribe. The text stays in the box until you press Send. Hold to talk is in Settings. Conversation mode is also in Settings and stays off until you turn it on. Replies can be spoken with a Windows voice already installed on this PC.
 - **Qwen.** Switch the chat provider to Qwen to use your own Alibaba Cloud Model Studio key. Chat uses `qwen3.7-plus` through the Singapore endpoint. The conversation stays in memory on this PC.
 - **Screen vision, only with consent.** Choose a rectangle, confirm the crop, read what will be sent, and click **Ask Qwen**. One click sends that crop and your question once. There is no automatic retry, and nothing is captured before you confirm.
@@ -27,7 +28,7 @@ Desktop Companion is an Electron overlay: a transparent window, a procedural rob
 | Development build | `npm run dev` on Windows. |
 | Installer | Not published. There is no downloadable release yet. |
 
-This is an active personal project. The robot, Home, trail, follow behavior, chat, local voice, copied-text questions, consented screen vision, and confirmed Windows actions are implemented in the source. They are exercised with local tests and a Windows smoke launch. An installer script exists for later packaging, but no official build is offered for download.
+This is an active personal project. The robot, Home, trail, follow behavior, chat, local voice, copied-text questions, consented screen vision, confirmed Windows actions, and saving a finished reply as a note are implemented in the source. They are exercised with local tests and a Windows smoke launch. An installer script exists for later packaging, but no official build is offered for download.
 
 ## Stack
 
@@ -84,6 +85,8 @@ The chat shows the exact copied text. Choose **Explain**, **Summarize**, **Trans
 
 The copied text is treated as untrusted content, not as instructions. It is read once, when you choose the command. The app does not watch the clipboard, read clipboard history, write or clear the clipboard, log the text, or save it. Closing the panel, pressing Escape, or closing chat discards it, and it is not attached to later questions. An empty clipboard says to copy text and try again. A selection longer than 4,000 characters is refused and is not shortened or sent. The ordinary message box stays limited to 500 characters.
 
+A finished summary, explanation, translation, or other reply can be saved afterward with **Save as note**. That step is separate from sending the question.
+
 ## Windows actions
 
 Four actions are available. Type the request and press Send, or speak it and then Send. In Conversation mode, the request is recognized only when that turn is sent.
@@ -98,6 +101,16 @@ Spanish and English both work when the whole message is the request. A longer qu
 The chat shows a card before anything happens. **Confirm** opens the named Windows app, or saves the note. **Cancel** does nothing. Closing the chat, Tray Sleep, or stopping the conversation drops a card that is still waiting. A second click does not run the action again.
 
 A note shows the text so you can edit it, up to 4,000 characters. **Choose destination** opens the Windows save dialog. The card then shows the file name and folder. Saving writes a `.txt` file only after Confirm. If that file already exists, a separate **Overwrite** button is required. The app opens only Calculator, Notepad, and File Explorer. It does not run a shell command or accept a path from the chat page.
+
+## Save a reply as a note
+
+Each completed Qwen or demo reply shows **Save as note** beside Speak. The button is not shown while a reply is still arriving, and it is not on your own messages.
+
+The same card used for a typed note opens with the exact reply. You can edit it, press **Choose destination**, and pick a `.txt` file in the Windows save dialog. The card then names the file and folder. **Confirm** writes it. If that file already exists, **Overwrite** is a separate button. **Cancel**, closing chat, or Tray Sleep drops the note before anything is written. A second click does not save twice.
+
+To summarize something you copied and keep the result: choose **Ask about copied text**, then **Summarize**, review the prepared question, and press Send. When the reply finishes, use **Save as note**. The reply is saved as text. It is never read as a command to open an app or run anything. A reply that cannot be stored as plain text, or that is longer than 4,000 characters, is refused whole and is not shortened.
+
+Screen Vision answers stay in the selection window. **Save as note** is not available there yet.
 
 ## Voice
 
@@ -142,7 +155,7 @@ Transcription runs for one utterance at a time, on two CPU threads, for at most 
 - Click-through can fail against an elevated window. The tray has a temporary whole-window recovery switch for that case.
 - Voice needs the local Whisper files described above and a Windows voice for Spanish or English. Recordings are not stored. Transcription can refuse to start when free memory is below 1,024 MB.
 - Copied text is plain text only, up to 4,000 characters, and only after you choose the command. There is no clipboard watcher, no image or file reading, and no automatic send.
-- Windows actions are Calculator, Notepad, File Explorer, and one plain-text note. The request has to be the whole message, in Spanish or English. A note is a `.txt` file you choose in the save dialog, up to 4,000 characters, and an existing file is replaced only after a separate overwrite confirmation.
+- Windows actions are Calculator, Notepad, File Explorer, and one plain-text note. The request has to be the whole message, in Spanish or English. A note is a `.txt` file you choose in the save dialog, up to 4,000 characters, and an existing file is replaced only after a separate overwrite confirmation. **Save as note** uses that same save step on a finished chat reply. Screen Vision responses are not yet supported.
 - Qwen calls depend on your key, quota, and the provider being reachable. The app does not switch models or retry a failed call.
 
 ## Roadmap

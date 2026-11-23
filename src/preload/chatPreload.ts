@@ -208,8 +208,8 @@ contextBridge.exposeInMainWorld('chat', {
   cancelWindowsAction(): void {
     ipcRenderer.send(WINDOWS_CANCEL);
   },
-  notifyActionPose(pose: 'thinking' | 'curious' | 'happy' | 'surprised' | 'clear'): void {
-    if (pose !== 'thinking' && pose !== 'curious' && pose !== 'happy' && pose !== 'surprised' && pose !== 'clear') {
+  notifyActionPose(pose: 'thinking' | 'curious' | 'attentive' | 'happy' | 'surprised' | 'clear'): void {
+    if (pose !== 'thinking' && pose !== 'curious' && pose !== 'attentive' && pose !== 'happy' && pose !== 'surprised' && pose !== 'clear') {
       return;
     }
     ipcRenderer.send(WINDOWS_POSE, pose);

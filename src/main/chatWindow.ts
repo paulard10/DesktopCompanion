@@ -440,6 +440,7 @@ export async function createChatController(options: {
   const applyActionPose = (pose: WindowsActionPose): void => {
     clearActionTimer();
     if (pose === 'clear') {
+      previewPose = null;
       options.onEyePreview('CLEAR');
       if (shownReason === 'preview') {
         shownPresence = '';
@@ -448,11 +449,24 @@ export async function createChatController(options: {
       }
       return;
     }
+    if (pose === 'attentive') {
+      if (session.status().busy || liveCapture()) {
+        return;
+      }
+      options.onEyePreview('CLEAR');
+      previewPose = 'ATTENTIVE';
+      shownPresence = 'ATTENTIVE';
+      shownReason = 'preview';
+      options.onPresence('ATTENTIVE');
+      return;
+    }
     if (pose === 'curious') {
+      previewPose = null;
       options.onEyePreview('CURIOUS');
       return;
     }
     if (pose === 'surprised') {
+      previewPose = null;
       options.onEyePreview('SURPRISED');
       actionTimer = setTimeout(() => {
         actionTimer = null;
@@ -462,6 +476,7 @@ export async function createChatController(options: {
       return;
     }
     if (pose === 'thinking' || pose === 'happy') {
+      previewPose = null;
       options.onEyePreview('CLEAR');
       options.onPresence(pose === 'thinking' ? 'THINKING' : 'HAPPY');
       if (pose === 'happy') options.onGesture('greet');
@@ -487,6 +502,12 @@ export async function createChatController(options: {
   const cancelWindowsAction = (): void => {
     windows.cancel();
     clearActionTimer();
+    previewPose = null;
+    options.onEyePreview('CLEAR');
+    if (shownReason === 'preview') {
+      shownPresence = '';
+      shownReason = '';
+    }
     if (win && !win.isDestroyed() && pageReady) {
       win.webContents.send(IpcChannels.windowsCleared);
     }
