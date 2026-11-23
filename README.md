@@ -15,6 +15,7 @@ Desktop Companion is an Electron overlay: a transparent window, a procedural rob
 - **Ask about copied text.** Copy text in another app, then choose the command from the tray or the chat attachment menu. The chat shows that text. Choose Explain, Summarize, Translate, or Ask anything, review it, and press Send. Copying alone does not open the feature or send anything.
 - **Windows actions.** Ask in chat, or by voice, to open Calculator, Notepad, or File Explorer, or to save a plain-text note. The robot shows the action and waits. Confirm is the only step that runs it.
 - **Save a reply as a note.** A finished chat reply has **Save as note**. Review and edit the text, choose a `.txt` file in the Windows save dialog, then confirm. An existing file needs a separate overwrite confirmation. A Screen Vision answer is not saved from the selection window.
+- **Personal memory.** Ask the robot to remember a fact, in Spanish or English. It shows the text and waits. **Save memory** is the only step that stores it. Saved memories stay on this PC. Sharing them with Qwen stays off until you turn it on in Settings.
 - **Voice.** Click the microphone to record and click it again to transcribe. The text stays in the box until you press Send. Hold to talk is in Settings. Conversation mode is also in Settings and stays off until you turn it on. Replies can be spoken with a Windows voice already installed on this PC.
 - **Qwen.** Switch the chat provider to Qwen to use your own Alibaba Cloud Model Studio key. Chat uses `qwen3.7-plus` through the Singapore endpoint. The conversation stays in memory on this PC.
 - **Screen vision, only with consent.** Choose a rectangle, confirm the crop, read what will be sent, and click **Ask Qwen**. One click sends that crop and your question once. There is no automatic retry, and nothing is captured before you confirm.
@@ -28,7 +29,7 @@ Desktop Companion is an Electron overlay: a transparent window, a procedural rob
 | Development build | `npm run dev` on Windows. |
 | Installer | Not published. There is no downloadable release yet. |
 
-This is an active personal project. The robot, Home, trail, follow behavior, chat, local voice, copied-text questions, consented screen vision, confirmed Windows actions, and saving a finished reply as a note are implemented in the source. They are exercised with local tests and a Windows smoke launch. An installer script exists for later packaging, but no official build is offered for download.
+This is an active personal project. The robot, Home, trail, follow behavior, chat, local voice, copied-text questions, consented screen vision, confirmed Windows actions, saving a finished reply as a note, and encrypted personal memory are implemented in the source. They are exercised with local tests and a Windows smoke launch. An installer script exists for later packaging, but no official build is offered for download.
 
 ## Stack
 
@@ -112,6 +113,21 @@ To summarize something you copied and keep the result: choose **Ask about copied
 
 Screen Vision answers stay in the selection window. **Save as note** is not available there yet.
 
+## Personal memory
+
+Memory is saved only when you ask for it. Type the request and press Send, or speak it and then Send. In Conversation mode, the request is recognized only when that turn is sent.
+
+- `Remember that I prefer short answers.`
+- `Recuerda que estoy desarrollando Bubearn.`
+
+The chat shows the exact text. You can edit it. **Save memory** stores it. **Cancel**, closing chat, or Tray Sleep drops it, and nothing is written. A quoted sentence, copied text, or a longer message stays ordinary chat. A saved fact is never treated as a command to open an app, capture the screen, or start the microphone.
+
+Ask `What do you remember about me?` or `¿Qué recuerdas de mis proyectos?` The answer is read on this PC. If nothing is saved, the robot says so. It does not invent memories, and that question does not call Qwen.
+
+Settings → **Memory** lists what is saved. You can add a memory, edit one, delete one, or clear all of them. Delete and Clear all each ask you to confirm. The same section has **Use saved memories in chat**. It starts off. When you turn it on, the newest 8 memories are included with the next Qwen message and sent to the provider. The header shows **Memory on**. Demo mode does not send them. The notes are background data. They are separate from your message and from the companion's rules.
+
+Each memory can be 240 characters. The list holds 20. A longer memory, or a 21st one, is refused whole and is not shortened. Text that looks like a password, an API key, or an access token is refused. Memories are encrypted with Windows protected storage in the app's user data. The file is not part of this repository, and the text is not written to the log. If protected storage is unavailable, nothing is saved.
+
 ## Voice
 
 The chat composer has one microphone. Click it to start, then click it again. Local transcription fills the message box. Edit it if needed, then use Send. Nothing is sent until you press Send.
@@ -157,6 +173,7 @@ Transcription runs for one utterance at a time, on two CPU threads, for at most 
 - Copied text is plain text only, up to 4,000 characters, and only after you choose the command. There is no clipboard watcher, no image or file reading, and no automatic send.
 - Windows actions are Calculator, Notepad, File Explorer, and one plain-text note. The request has to be the whole message, in Spanish or English. A note is a `.txt` file you choose in the save dialog, up to 4,000 characters, and an existing file is replaced only after a separate overwrite confirmation. **Save as note** uses that same save step on a finished chat reply. Screen Vision responses are not yet supported.
 - Qwen calls depend on your key, quota, and the provider being reachable. The app does not switch models or retry a failed call.
+- Personal memory stores up to 20 facts, each up to 240 characters, and only after Save memory. Sharing them with Qwen is off until you enable it, and then only the newest 8 are included. Demo mode does not send them. A memory cannot be read back if Windows protected storage is unavailable or the saved file cannot be decrypted. Closing chat discards a proposal that was not saved.
 
 ## Roadmap
 

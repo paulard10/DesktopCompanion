@@ -26,6 +26,15 @@ const WINDOWS_SAVE_NOTE = 'windows:save-note';
 const WINDOWS_CANCEL = 'windows:cancel';
 const WINDOWS_CLEARED = 'windows:cleared';
 const WINDOWS_POSE = 'windows:pose';
+const MEMORY_SNAPSHOT = 'memory:snapshot';
+const MEMORY_CREATE = 'memory:create';
+const MEMORY_UPDATE = 'memory:update';
+const MEMORY_DELETE = 'memory:delete';
+const MEMORY_CLEAR = 'memory:clear';
+const MEMORY_USE = 'memory:use';
+const MEMORY_STATE = 'memory:state';
+const MEMORY_CLEARED = 'memory:cleared';
+const MEMORY_TEXT_LIMIT = 240;
 const NOTE_TEXT_LIMIT = 4_000;
 const CLIPBOARD_TEXT_LIMIT = 4_000;
 const CLIPBOARD_MESSAGE_LIMIT = 4_800;
@@ -216,6 +225,50 @@ contextBridge.exposeInMainWorld('chat', {
   },
   onWindowsCleared(listener: () => void): () => void {
     return listen(WINDOWS_CLEARED, () => listener());
+  },
+  async memorySnapshot() {
+    return readMemoryView(await ipcRenderer.invoke(MEMORY_SNAPSHOT));
+  },
+  async saveMemory(input: { token: string; text: string; revision: number }) {
+    if (!isMemoryToken(input?.token) || typeof input.text !== 'string' || input.text.length > MEMORY_TEXT_LIMIT || !isMemoryRevision(input.revision)) {
+      return { ok: false as const, reason: 'invalid' };
+    }
+    return readMemoryWrite(await ipcRenderer.invoke(MEMORY_CREATE, input));
+  },
+  async updateMemory(input: { token: string; id: string; text: string; revision: number }) {
+    if (!isMemoryToken(input?.token) || !isMemoryId(input.id) || typeof input.text !== 'string' || input.text.length > MEMORY_TEXT_LIMIT || !isMemoryRevision(input.revision)) {
+      return { ok: false as const, reason: 'invalid' };
+    }
+    return readMemoryWrite(await ipcRenderer.invoke(MEMORY_UPDATE, input));
+  },
+  async deleteMemory(input: { token: string; id: string; revision: number }) {
+    if (!isMemoryToken(input?.token) || !isMemoryId(input.id) || !isMemoryRevision(input.revision)) {
+      return { ok: false as const, reason: 'invalid' };
+    }
+    return readMemoryWrite(await ipcRenderer.invoke(MEMORY_DELETE, input));
+  },
+  async clearMemories(input: { token: string; revision: number }) {
+    if (!isMemoryToken(input?.token) || !isMemoryRevision(input.revision)) {
+      return { ok: false as const, reason: 'invalid' };
+    }
+    return readMemoryWrite(await ipcRenderer.invoke(MEMORY_CLEAR, input));
+  },
+  async setMemoryUse(input: { token: string; enabled: boolean; revision: number }) {
+    if (!isMemoryToken(input?.token) || typeof input.enabled !== 'boolean' || !isMemoryRevision(input.revision)) {
+      return { ok: false as const, reason: 'invalid' };
+    }
+    return readMemoryWrite(await ipcRenderer.invoke(MEMORY_USE, input));
+  },
+  onMemoryState(listener: (state: { useInChat: boolean; count: number; available: boolean; readable: boolean; revision: number }) => void): () => void {
+    return listen(MEMORY_STATE, (payload) => {
+      const state = readMemoryState(payload);
+      if (state) {
+        listener(state);
+      }
+    });
+  },
+  onMemoryCleared(listener: () => void): () => void {
+    return listen(MEMORY_CLEARED, () => listener());
   },
   onCopiedText(listener: (offer: { kind: 'clear' | 'empty' } | { kind: 'too-long'; length: number; limit: number } | { kind: 'ready'; text: string }) => void): () => void {
     return listen(CLIPBOARD_OFFER, (payload) => {
@@ -639,5 +692,84 @@ function readUsage(value: unknown): ChatStatusPayload['usage'] {
     completionTokens: record.completionTokens,
     reasoningTokens: reasoningTokens ?? null,
     totalTokens: totalTokens ?? null,
+  };
+}
+
+function isMemoryToken(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
+}
+
+function isMemoryId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{16}$/.test(value);
+}
+
+function isMemoryRevision(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 1_000_000_000;
+}
+
+function readMemoryWrite(value: unknown): { ok: true; revision: number; count: number; useInChat: boolean } | { ok: false; reason: string } {
+  if (!value || typeof value !== 'object') {
+    return { ok: false, reason: 'invalid' };
+  }
+  const record = value as Record<string, unknown>;
+  if (record.ok === true && isMemoryRevision(record.revision) && typeof record.count === 'number' && Number.isInteger(record.count) && typeof record.useInChat === 'boolean') {
+    return { ok: true, revision: record.revision, count: record.count, useInChat: record.useInChat };
+  }
+  if (record.ok === false && typeof record.reason === 'string' && record.reason.length > 0 && record.reason.length < 40) {
+    return { ok: false, reason: record.reason };
+  }
+  return { ok: false, reason: 'invalid' };
+}
+
+function readMemoryView(value: unknown): { ok: true; available: boolean; readable: boolean; revision: number; useInChat: boolean; count: number; items: { id: string; text: string }[] } | { ok: false; reason: string } {
+  if (!value || typeof value !== 'object') {
+    return { ok: false, reason: 'invalid' };
+  }
+  const record = value as Record<string, unknown>;
+  if (record.ok === false && typeof record.reason === 'string') {
+    return { ok: false, reason: record.reason };
+  }
+  if (record.ok !== true || typeof record.available !== 'boolean' || typeof record.readable !== 'boolean' || !isMemoryRevision(record.revision) || typeof record.useInChat !== 'boolean' || typeof record.count !== 'number' || !Array.isArray(record.items)) {
+    return { ok: false, reason: 'invalid' };
+  }
+  if (record.items.length > 20 || record.items.length !== record.count) {
+    return { ok: false, reason: 'unreadable' };
+  }
+  const items: { id: string; text: string }[] = [];
+  for (const item of record.items) {
+    if (!item || typeof item !== 'object') {
+      return { ok: false, reason: 'unreadable' };
+    }
+    const row = item as Record<string, unknown>;
+    if (!isMemoryId(row.id) || typeof row.text !== 'string' || row.text.length === 0 || row.text.length > MEMORY_TEXT_LIMIT) {
+      return { ok: false, reason: 'unreadable' };
+    }
+    items.push({ id: row.id, text: row.text });
+  }
+  return {
+    ok: true,
+    available: record.available,
+    readable: record.readable,
+    revision: record.revision,
+    useInChat: record.useInChat,
+    count: record.count,
+    items,
+  };
+}
+
+function readMemoryState(value: unknown): { useInChat: boolean; count: number; available: boolean; readable: boolean; revision: number } | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.useInChat !== 'boolean' || typeof record.count !== 'number' || typeof record.available !== 'boolean' || typeof record.readable !== 'boolean' || !isMemoryRevision(record.revision)) {
+    return null;
+  }
+  return {
+    useInChat: record.useInChat,
+    count: record.count,
+    available: record.available,
+    readable: record.readable,
+    revision: record.revision,
   };
 }

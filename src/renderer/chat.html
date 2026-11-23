@@ -13,6 +13,7 @@
         <div class="title-block">
           <div class="name">Companion</div>
           <p id="status" class="status">Demo. No AI connected.</p>
+          <p id="memory-on" class="memory-on" hidden>Memory on</p>
         </div>
         <div class="controls">
           <button type="button" id="settings-toggle" aria-label="Settings" aria-expanded="false" aria-controls="settings">
@@ -79,6 +80,16 @@
             <button type="button" id="windows-action-confirm" class="send">Confirm</button>
             <button type="button" id="windows-action-overwrite" hidden>Overwrite</button>
             <button type="button" id="windows-action-cancel">Cancel</button>
+          </div>
+        </section>
+        <section id="memory-card" class="action-card" hidden>
+          <p id="memory-card-title"></p>
+          <textarea id="memory-card-text" rows="3" maxlength="240" aria-label="Memory" hidden></textarea>
+          <ul id="memory-card-list" hidden></ul>
+          <p id="memory-card-note" class="action-destination" hidden></p>
+          <div class="action-card-buttons">
+            <button type="button" id="memory-card-save" class="send" hidden>Save memory</button>
+            <button type="button" id="memory-card-cancel">Cancel</button>
           </div>
         </section>
         <form id="composer" class="composer">
@@ -164,6 +175,26 @@
           <p id="disclosure" class="disclosure" hidden>
             Qwen sends this conversation to Alibaba Model Studio in Singapore. It stays in memory on this PC and is not written to disk.
           </p>
+          <p class="settings-title">Memory</p>
+          <label class="option" for="memory-use">
+            <input type="checkbox" id="memory-use" />
+            Use saved memories in chat
+          </label>
+          <p id="memory-note" class="settings-note">Off until you turn it on. When it is on, the newest 8 memories are included with Qwen messages and sent to the provider. Demo mode does not send them. Memories do not run Windows actions.</p>
+          <p id="memory-state" class="key-state"></p>
+          <div id="memory-list"></div>
+          <div id="memory-editor" hidden>
+            <textarea id="memory-draft" rows="3" maxlength="240" aria-label="Memory text"></textarea>
+            <div class="action-card-buttons">
+              <button type="button" id="memory-save" class="send">Save memory</button>
+              <button type="button" id="memory-cancel-edit">Cancel</button>
+            </div>
+          </div>
+          <div class="action-card-buttons">
+            <button type="button" id="memory-add">Add memory</button>
+            <button type="button" id="memory-clear">Clear all</button>
+            <button type="button" id="memory-clear-cancel" hidden>Cancel</button>
+          </div>
           <button type="button" id="clear" class="clear">Clear conversation</button>
         </div>
       </div>

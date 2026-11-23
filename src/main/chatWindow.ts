@@ -10,7 +10,9 @@ import { isPresenceName } from '../shared/presence.js';
 import { isContextMessage, type ClipboardOffer } from '../shared/clipboardContext.js';
 import { readCopiedText } from './clipboardText.js';
 import { attachWindowsActionIpc } from './windowsActions.js';
+import { attachPersonalMemoryIpc, createDesktopMemoryStore } from './personalMemoryIpc.js';
 import type { WindowsActionPose } from '../shared/windowsAction.js';
+import { messagesForProvider } from '../shared/personalMemory.js';
 import { IpcChannels } from '../shared/ipc.js';
 import { validateApiKey } from '../shared/keyVault.js';
 import { classifyProviderHttp, providerFailureMessage } from '../shared/providerErrors.js';
@@ -106,9 +108,11 @@ export async function createChatController(options: {
     }
     options.onPresence(choice.presence);
   };
+  const providerSettings = createProviderSettings(path.join(storageDir, 'provider-settings.json'));
+  const memoryStore = createDesktopMemoryStore(path.join(storageDir, 'memories.bin'));
   const session = createConversationSession({
     vault,
-    settings: createProviderSettings(path.join(storageDir, 'provider-settings.json')),
+    settings: providerSettings,
     hooks: {
       history(lines) {
         publishHistory(lines);
@@ -132,7 +136,11 @@ export async function createChatController(options: {
       },
     },
     createDemo: (text) => createDemoProvider(demoReply, text),
-    modelMessages,
+    modelMessages: (history) => messagesForProvider(
+      providerSettings.current().provider,
+      modelMessages(history),
+      memoryStore.contextNotes(),
+    ),
     validateEndpoint: parseSingaporeEndpoint,
     validateKey: validateApiKey,
     failureMessage: providerFailureMessage,
@@ -164,6 +172,7 @@ export async function createChatController(options: {
     publishHistory(session.history());
     sendToChat(IpcChannels.chatStatus, session.status());
     sendToChat(IpcChannels.ttsSettings, ttsSettings.current());
+    memory.publish();
     if (win && !win.isDestroyed() && win.isVisible()) {
       win.webContents.send(IpcChannels.chatFocus);
     }
@@ -499,6 +508,16 @@ export async function createChatController(options: {
     getParent: () => (win && !win.isDestroyed() ? win : null),
     onPose: applyActionPose,
   });
+  const memory = attachPersonalMemoryIpc({
+    isChatFrame: (event) => isChatFrame(event, options.dev),
+    store: memoryStore,
+    send: (state) => sendToChat(IpcChannels.memoryState, state),
+  });
+  const cancelMemoryProposal = (): void => {
+    if (win && !win.isDestroyed() && pageReady) {
+      win.webContents.send(IpcChannels.memoryCleared);
+    }
+  };
   const cancelWindowsAction = (): void => {
     windows.cancel();
     clearActionTimer();
@@ -559,6 +578,7 @@ export async function createChatController(options: {
     offerClipboard,
     stopVoice(): void {
       cancelWindowsAction();
+      cancelMemoryProposal();
       speech.cancel();
       captureBusy = false;
       conversationHold = false;
@@ -586,6 +606,7 @@ export async function createChatController(options: {
         options.microphoneGate.disarm(win.webContents);
         win.webContents.send(IpcChannels.speechForceStop);
         win.webContents.send(IpcChannels.ttsForceStop);
+        win.webContents.send(IpcChannels.memoryCleared);
         win.hide();
       }
       ttsSpeaking = false;
@@ -596,6 +617,7 @@ export async function createChatController(options: {
       pendingOffer = null;
       windows.cancel();
       windows.dispose();
+      memory.dispose();
       publishOverlayPresence();
       await speech.waitForIdle();
       session.stop();
@@ -655,6 +677,7 @@ export async function createChatController(options: {
 
   function hide(): void {
     cancelWindowsAction();
+    cancelMemoryProposal();
     session.stop();
     speech.cancel();
     pendingOffer = null;

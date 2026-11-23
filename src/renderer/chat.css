@@ -65,6 +65,14 @@ button { -webkit-app-region: no-drag; }
   text-overflow: ellipsis;
 }
 
+.memory-on {
+  margin: 1px 0 0;
+  color: #d7ff63;
+  font-size: 11px;
+}
+
+.memory-on[hidden] { display: none; }
+
 .controls {
   display: flex;
   gap: 2px;
@@ -450,6 +458,60 @@ textarea::placeholder { color: #8d877d; }
   color: #d7ff63;
   border-color: #14171c;
 }
+
+#memory-card-text,
+#memory-draft {
+  width: 100%;
+  min-height: 64px;
+  max-height: 120px;
+  resize: none;
+  border: 1px solid #e4ddd2;
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px;
+}
+
+#memory-card-list {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 140px;
+  overflow: auto;
+  font-weight: 450;
+}
+
+#memory-card-list[hidden] { display: none; }
+
+.memory-row {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid #e4ddd2;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.memory-row p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memory-row-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.memory-row-actions button {
+  border: 0;
+  background: transparent;
+  color: #6f6a62;
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+}
+
+#memory-editor[hidden] { display: none; }
 
 .conversation-live {
   display: flex;

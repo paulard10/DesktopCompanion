@@ -16,7 +16,10 @@ import { createChromiumTtsProvider } from './chromiumTtsProvider.ts';
 import { SpeechCapture } from './speechCapture.ts';
 import { mountCopiedText } from './copiedTextPanel.ts';
 import { noteProposalFromReply, recognizeWindowsAction } from '../shared/windowsAction';
+import { recognizeMemoryRequest } from '../shared/personalMemory';
 import { mountWindowsAction } from './windowsActionCard';
+import { mountMemoryCard } from './memoryCard';
+import { mountMemorySettings } from './memorySettings';
 
 declare global {
   interface ImportMeta {
@@ -80,6 +83,7 @@ const voicePhase = document.querySelector<HTMLElement>('#voice-phase');
 const bridge = window.chat;
 let beforeHide = (): void => {};
 let dismissWindowsAction = (): void => {};
+let dismissMemory = (): void => {};
 if (closeButton && bridge) {
   closeButton.addEventListener('click', () => {
     beforeHide();
@@ -611,6 +615,7 @@ if (
   };
   const endConversation = (): void => {
     dismissWindowsAction();
+    dismissMemory();
     liveConversation = false;
     allowResume = false;
     awaitingConfirm = false;
@@ -817,6 +822,32 @@ if (
     },
   });
   dismissWindowsAction = () => windowsAction.dismiss();
+  const memorySettings = mountMemorySettings(document, bridge);
+  const memoryCard = mountMemoryCard(document, bridge, {
+    onShow() {
+      awaitingConfirm = true;
+      renderVoice();
+    },
+    onDismiss() {
+      awaitingConfirm = false;
+      renderVoice();
+    },
+    onSaved() {
+      void memorySettings.reload();
+    },
+  });
+  const memoryFlag = document.querySelector<HTMLElement>('#memory-on');
+  bridge.onMemoryState((state) => {
+    if (memoryFlag) {
+      memoryFlag.hidden = state.useInChat !== true;
+    }
+  });
+  dismissMemory = () => {
+    if (memoryCard.isPending()) {
+      bridge.notifyActionPose('clear');
+    }
+    memoryCard.dismiss();
+  };
 
   const refreshCopied = mountCopiedText(document, bridge, {
     busy: () => generating,
@@ -836,6 +867,18 @@ if (
     if (generating || !validated.ok) {
       return;
     }
+    const memoryRequest = recognizeMemoryRequest(validated.text);
+    if (memoryRequest) {
+      voiceReplyPending = false;
+      noteCapture('CLEAR');
+      composer.value = '';
+      refreshSend();
+      windowsAction.dismiss();
+      memoryCard.propose(memoryRequest);
+      composer.focus();
+      return;
+    }
+    dismissMemory();
     const proposal = recognizeWindowsAction(validated.text);
     if (proposal) {
       voiceReplyPending = false;
@@ -887,6 +930,7 @@ if (
 
   clearButton.addEventListener('click', () => {
     dismissWindowsAction();
+    dismissMemory();
     tts.stop();
     speech.cancel();
     voice.apply('reset');
@@ -1020,6 +1064,7 @@ if (
     input.addEventListener('change', () => {
       if (input.checked) {
         dismissWindowsAction();
+        dismissMemory();
         bridge.setProvider(input.value === 'qwen' ? 'qwen' : 'demo');
       }
     });

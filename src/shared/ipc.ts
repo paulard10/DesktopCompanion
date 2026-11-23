@@ -2,6 +2,35 @@ import type { ClipboardOffer } from './clipboardContext.js';
 import type { EyePreviewCue } from './faceExpression.js';
 import type { NotePickResult, NoteSaveResult, OpenActionResult, OpenTarget, WindowsActionPose } from './windowsAction.js';
 
+export interface MemoryStateMessage {
+  useInChat: boolean;
+  count: number;
+  available: boolean;
+  readable: boolean;
+  revision: number;
+}
+
+export interface MemoryItemMessage {
+  id: string;
+  text: string;
+}
+
+export type MemoryView =
+  | {
+      ok: true;
+      available: boolean;
+      readable: boolean;
+      revision: number;
+      useInChat: boolean;
+      count: number;
+      items: readonly MemoryItemMessage[];
+    }
+  | { ok: false; reason: string };
+
+export type MemoryWriteMessage =
+  | { ok: true; revision: number; count: number; useInChat: boolean }
+  | { ok: false; reason: string };
+
 export const IpcChannels = {
   frameReady: 'overlay:frame-ready',
   circleClick: 'overlay:circle-click',
@@ -30,6 +59,14 @@ export const IpcChannels = {
   windowsCancel: 'windows:cancel',
   windowsCleared: 'windows:cleared',
   windowsPose: 'windows:pose',
+  memorySnapshot: 'memory:snapshot',
+  memoryCreate: 'memory:create',
+  memoryUpdate: 'memory:update',
+  memoryDelete: 'memory:delete',
+  memoryClear: 'memory:clear',
+  memoryUse: 'memory:use',
+  memoryState: 'memory:state',
+  memoryCleared: 'memory:cleared',
   chatHistory: 'chat:history',
   chatFocus: 'chat:focus',
   chatDelta: 'chat:delta',
@@ -161,6 +198,14 @@ export interface ChatBridge {
   cancelWindowsAction: () => void;
   notifyActionPose: (pose: WindowsActionPose) => void;
   onWindowsCleared: (listener: () => void) => () => void;
+  memorySnapshot: () => Promise<MemoryView>;
+  saveMemory: (input: { token: string; text: string; revision: number }) => Promise<MemoryWriteMessage>;
+  updateMemory: (input: { token: string; id: string; text: string; revision: number }) => Promise<MemoryWriteMessage>;
+  deleteMemory: (input: { token: string; id: string; revision: number }) => Promise<MemoryWriteMessage>;
+  clearMemories: (input: { token: string; revision: number }) => Promise<MemoryWriteMessage>;
+  setMemoryUse: (input: { token: string; enabled: boolean; revision: number }) => Promise<MemoryWriteMessage>;
+  onMemoryState: (listener: (state: MemoryStateMessage) => void) => () => void;
+  onMemoryCleared: (listener: () => void) => () => void;
   stopGeneration: () => void;
   saveKey: (key: string) => void;
   removeKey: () => void;
