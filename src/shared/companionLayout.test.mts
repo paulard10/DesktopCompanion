@@ -69,14 +69,14 @@ test('body projection and interaction remain the legacy camera and circle', () =
 
 test('badge bounds follow compact layout while legacy box and readable chat are preserved', () => {
   assert.deepEqual(chatBadgeBoundsDip(LEGACY_LAYOUT), { x: 244, y: 314, width: 36, height: 36 });
-  assert.deepEqual(chatBadgeBoundsDip(), { x: 172, y: 180, width: 36, height: 36 });
+  assert.deepEqual(chatBadgeBoundsDip(), { x: 172, y: 74, width: 36, height: 36 });
   const style = { left: '', top: '', width: '', height: '' };
   applyChatBadgeLayout(style);
-  assert.deepEqual(style, { left: '172px', top: '180px', width: '36px', height: '36px' });
-  assert.equal(chatTriggerHit(190, 198), true);
-  assert.equal(chatTriggerHit(208, 198), true);
-  assert.equal(chatTriggerHit(209, 198), false);
-  assert.equal(chatTriggerHit(172, 180), false); // square CSS corner is not a circular hit
+  assert.deepEqual(style, { left: '172px', top: '74px', width: '36px', height: '36px' });
+  assert.equal(chatTriggerHit(190, 92), true);
+  assert.equal(chatTriggerHit(208, 92), true);
+  assert.equal(chatTriggerHit(209, 92), false);
+  assert.equal(chatTriggerHit(172, 74), false); // square CSS corner is not a circular hit
   assert.deepEqual(placeChat(legacyHome, work), { x: 1212, y: 504, width: 380, height: 520 });
   const main = readFileSync(path.join(root, 'src/renderer/main.ts'), 'utf8');
   assert.ok(main.indexOf('applyChatBadgeLayout(trigger.style)') < main.indexOf('const scene ='));
@@ -173,7 +173,7 @@ test('compiled production consumers resolve the same layout without source TS im
   assert.deepEqual(compiled.COMPANION_LAYOUT, COMPANION_LAYOUT);
   assert.deepEqual(placement.placeOverlay(work), { x: 1688, y: 800, width: 216, height: 224 });
   assert.deepEqual(pointer.orbGeometry(300, 400), orbGeometry(300, 400));
-  assert.equal(badge.chatTriggerHit(190, 198), true);
+  assert.equal(badge.chatTriggerHit(190, 92), true);
   assert.deepEqual(trail.trailingPoint(legacyHome, 20, 0), { x: 1692, y: 824 });
 });
 

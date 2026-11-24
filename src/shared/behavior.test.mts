@@ -38,7 +38,7 @@ test('the robot starts asleep', () => {
   assert.equal(alertness(state, 0), 0);
 });
 
-test('an idle robot sleeps at the two minute quiet deadline', () => {
+test('an idle robot stays awake past the old quiet deadline', () => {
   assert.equal(INACTIVITY_MS, QUIET_MS);
   assert.equal(BEDTIME_LINGER_MS, 25_000);
   const idle = awakeAt(0);
@@ -46,8 +46,8 @@ test('an idle robot sleeps at the two minute quiet deadline', () => {
   assert.equal(idle.sleepDeadline, INACTIVITY_MS);
   const before = stepBehavior(idle, INACTIVITY_MS - 1, false);
   assert.equal(before.phase, 'IDLE');
-  const asleep = stepBehavior(before, INACTIVITY_MS, false);
-  assert.equal(asleep.phase, 'RETURNING_TO_SLEEP');
+  const still = stepBehavior(before, INACTIVITY_MS + 60_000, false);
+  assert.equal(still.phase, 'IDLE');
 });
 
 test('an exploration hold defers idle sleep and does not renew itself', () => {
@@ -69,7 +69,7 @@ test('an exploration hold defers idle sleep and does not renew itself', () => {
   const woke = reduceBehavior(cursor, { type: 'WAKE' }, (idle.sleepDeadline ?? 0) + 3);
   assert.equal(woke.exploreUntil, held.exploreUntil);
   const released = reduceBehavior(woke, { type: 'EXPLORE', until: null }, held.exploreUntil ?? 0);
-  assert.equal(released.phase, 'RETURNING_TO_SLEEP');
+  assert.equal(released.phase, 'TRACKING');
   assert.equal(released.exploreUntil, null);
 });
 
@@ -83,7 +83,7 @@ test('a later wake does not revive an idle deadline that already elapsed during 
   assert.equal(clicked.sleepDeadline, idle.sleepDeadline);
   assert.equal(clicked.exploreUntil, held.exploreUntil);
   const ended = reduceBehavior(clicked, { type: 'EXPLORE', until: null }, held.exploreUntil ?? 0);
-  assert.equal(ended.phase, 'RETURNING_TO_SLEEP');
+  assert.equal(ended.phase, 'IDLE');
   assert.equal(ended.exploreUntil, null);
 });
 
@@ -104,7 +104,7 @@ test('a hold longer than six minutes is cut, and a clock jump still ends it', ()
   const held = reduceBehavior(idle, { type: 'EXPLORE', until: idle.lastTick + WANDER_EXPLORE_MS + 120_000 }, idle.lastTick);
   assert.equal(held.exploreUntil, idle.lastTick + EXPLORE_HOLD_MS);
   const jumped = reduceBehavior(held, { type: 'CLOCK_RESUME' }, held.exploreUntil ?? 0);
-  assert.equal(jumped.phase, 'RETURNING_TO_SLEEP');
+  assert.equal(jumped.phase, 'IDLE');
   assert.equal(jumped.exploreUntil, null);
 });
 
@@ -174,17 +174,19 @@ test('cursor movement never wakes the robot or moves the sleep deadline', () => 
   assert.equal(tracking.phase, 'TRACKING');
   assert.equal(tracking.sleepDeadline, INACTIVITY_MS);
 
-  const returning = reduceBehavior(tracking, { type: 'TICK' }, INACTIVITY_MS);
-  assert.equal(returning.phase, 'RETURNING_TO_SLEEP');
-  assert.equal(returning.sleepDeadline, null);
+  const staying = reduceBehavior(tracking, { type: 'TICK' }, INACTIVITY_MS);
+  assert.equal(staying.phase, 'TRACKING');
+  assert.equal(staying.sleepDeadline, INACTIVITY_MS);
 });
 
-test('inactivity returns the robot to sleep', () => {
+test('inactivity does not return the robot to sleep', () => {
   const idle = awakeAt(0);
   const before = reduceBehavior(idle, { type: 'TICK' }, INACTIVITY_MS - 1);
   assert.equal(before.phase, 'IDLE');
 
-  const returning = reduceBehavior(idle, { type: 'TICK' }, INACTIVITY_MS);
+  const staying = reduceBehavior(idle, { type: 'TICK' }, INACTIVITY_MS);
+  assert.equal(staying.phase, 'IDLE');
+  const returning = reduceBehavior(staying, { type: 'USER_SLEEP' }, INACTIVITY_MS);
   assert.equal(returning.phase, 'RETURNING_TO_SLEEP');
   assert.equal(alertness(returning, INACTIVITY_MS), 1);
 
@@ -198,7 +200,7 @@ test('inactivity returns the robot to sleep', () => {
 });
 
 test('a wake during the return to sleep reverses from the current pose', () => {
-  const returning = reduceBehavior(awakeAt(0), { type: 'TICK' }, INACTIVITY_MS);
+  const returning = reduceBehavior(awakeAt(0), { type: 'USER_SLEEP' }, INACTIVITY_MS);
   const at = INACTIVITY_MS + SLEEP_MS / 2;
   const level = alertness(returning, at);
   assert.ok(Math.abs(level - 0.5) < 0.02);
@@ -247,17 +249,16 @@ test('a clock jump clamps the animation and still honors the sleep deadline', ()
 
   const idle = awakeAt(0);
   const afterGap = stepBehavior(idle, 130_000, true);
-  assert.equal(afterGap.phase, 'RETURNING_TO_SLEEP');
-  assert.equal(afterGap.since, 130_000);
-  assert.equal(afterGap.sleepDeadline, null);
+  assert.equal(afterGap.phase, 'TRACKING');
+  assert.equal(afterGap.sleepDeadline, INACTIVITY_MS);
 
-  const finished = reduceBehavior(afterGap, { type: 'TICK' }, 130_000 + SLEEP_MS);
-  assert.equal(finished.phase, 'SLEEPING');
+  const finished = reduceBehavior(afterGap, { type: 'USER_SLEEP' }, 130_000);
+  const asleep = reduceBehavior(finished, { type: 'TICK' }, 130_000 + SLEEP_MS);
+  assert.equal(asleep.phase, 'SLEEPING');
 
   const expiredWake = reduceBehavior(waking, { type: 'CLOCK_RESUME' }, 130_000);
-  assert.equal(expiredWake.phase, 'RETURNING_TO_SLEEP');
-  assert.ok(expiredWake.blendFrom > 0 && expiredWake.blendFrom < 1);
-  assert.equal(expiredWake.since, 130_000);
+  assert.equal(expiredWake.phase, 'WAKING');
+  assert.equal(expiredWake.sleepDeadline, INACTIVITY_MS);
 });
 
 test('sleep skips frames and every other phase renders', () => {

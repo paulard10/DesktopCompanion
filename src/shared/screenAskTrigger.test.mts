@@ -5,6 +5,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { armProxyHit, orbGeometry } from './clickThrough.ts';
 import { COMPANION_LAYOUT } from './companionLayout.ts';
+import { dockingGeometry, placeDockableHome } from './dockingGeometry.ts';
+import { homeHit } from './homeGeometry.ts';
 import { chatTriggerHit } from './chatTrigger.ts';
 import { SCREEN_ASK_CENTER_X, SCREEN_ASK_CENTER_Y, SCREEN_ASK_HIT_RADIUS_DIP, SCREEN_ASK_RADIUS_DIP, screenAskBoundsDip, screenAskHit, screenAskHitBoundsDip, screenAskVisible, withScreenAskTrigger } from './screenAskTrigger.ts';
 
@@ -12,7 +14,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
 test('screen ask sits opposite chat, outside the body and the arms', () => {
   const bounds = screenAskBoundsDip();
-  assert.deepEqual(bounds, { x: 8, y: 180, width: 36, height: 36 });
+  assert.deepEqual(bounds, { x: 8, y: 74, width: 36, height: 36 });
   assert.equal(screenAskHit(SCREEN_ASK_CENTER_X, SCREEN_ASK_CENTER_Y), true);
   assert.equal(screenAskHit(bounds.x, bounds.y), true);
   assert.ok(SCREEN_ASK_HIT_RADIUS_DIP > SCREEN_ASK_RADIUS_DIP);
@@ -56,4 +58,29 @@ test('the robot page keeps body click for wake and chat, and adds a separate scr
   assert.equal(renderer.includes('screenAsk.hidden = !import.meta.env.DEV'), false);
   assert.match(preload, /overlay:select-screen/);
   assert.equal(preload.includes('setIgnoreMouseEvents'), false);
+});
+
+test('docked chat and screen-ask stay off the house, and the house wins the pointer', () => {
+  const area = { x: 0, y: 0, width: 1920, height: 1040 };
+  const platform = placeDockableHome(area);
+  assert.ok(platform);
+  const target = dockingGeometry(platform, area)!.target;
+  const chat = COMPANION_LAYOUT.chatBadgeDip;
+  const circles = [
+    { x: chat.centerX, y: chat.centerY, radius: chat.radius },
+    { x: SCREEN_ASK_CENTER_X, y: SCREEN_ASK_CENTER_Y, radius: SCREEN_ASK_HIT_RADIUS_DIP },
+  ];
+  for (const circle of circles) {
+    for (let step = 0; step < 8; step += 1) {
+      const angle = (step / 8) * Math.PI * 2;
+      const localX = circle.x + Math.cos(angle) * circle.radius;
+      const localY = circle.y + Math.sin(angle) * circle.radius;
+      assert.equal(homeHit(target.x + localX - platform.x, target.y + localY - platform.y), false);
+    }
+  }
+  const ring = homeHit(target.x + 108 - platform.x, target.y + 162 - platform.y);
+  assert.equal(ring, true);
+  const overlay = readFileSync(path.join(root, 'src/main/overlayWindow.ts'), 'utf8');
+  assert.match(overlay, /reason: 'home-platform'/);
+  assert.match(overlay, /homeHit\(cursor\.x - platform\.x, cursor\.y - platform\.y\)/);
 });

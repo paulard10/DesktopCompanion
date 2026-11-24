@@ -1,8 +1,8 @@
 /**
- * Pure character behavior. Cursor samples never wake the robot and never
- * move the inactivity deadline. Wake, tray Sleep, and explicit activity
- * notes are the intentional events. An exploration hold can defer the idle
- * deadline once. It does not move that deadline, and it never wakes a sleeping robot.
+ * Pure character behavior. The robot stays awake until the user sends it to
+ * sleep. Cursor samples never wake it. Wake and user sleep are the only
+ * phase changes that start or end rest. Activity notes and exploration holds
+ * still record a deadline, and that deadline no longer starts sleep.
  *
  * INACTIVITY_MS matches activity.ts QUIET_MS. BEDTIME_LINGER_MS matches the
  * dock window there. The node test runner loads this file as TypeScript, so
@@ -208,9 +208,6 @@ function clockResume(state: BehaviorState, now: number): BehaviorState {
     targetLostSince: state.targetLostSince === null ? null : state.targetLostSince + skip,
     lastTick: now,
   };
-  if (idleElapsed(clamped, now) && !leaseOpen(clamped, now)) {
-    return beginSleep(clamped, now, clamp01(alertness(clamped, now)));
-  }
   return settle(clamped, now);
 }
 
@@ -243,36 +240,10 @@ function settle(state: BehaviorState, now: number): BehaviorState {
       targetLostSince: null,
     };
   }
-  if (idleElapsed(current, now) && !leaseOpen(current, now)) {
-    current = beginSleep(current, now, 1);
+  if (current.exploreUntil !== null && now >= current.exploreUntil) {
+    current = { ...current, exploreUntil: null };
   }
   return current;
-}
-
-function idleElapsed(state: BehaviorState, now: number): boolean {
-  return (
-    (state.phase === 'IDLE' || state.phase === 'TRACKING' || state.phase === 'WAKING') &&
-    state.sleepDeadline !== null &&
-    now >= state.sleepDeadline &&
-    !state.activityHold
-  );
-}
-
-function leaseOpen(state: BehaviorState, now: number): boolean {
-  return state.exploreUntil !== null && now < state.exploreUntil;
-}
-
-function beginSleep(state: BehaviorState, now: number, blendFrom: number): BehaviorState {
-  return {
-    ...state,
-    phase: 'RETURNING_TO_SLEEP',
-    since: now,
-    blendFrom,
-    sleepDeadline: null,
-    targetLostSince: null,
-    exploreUntil: null,
-    activityHold: false,
-  };
 }
 
 function awakePhase(state: BehaviorState): boolean {

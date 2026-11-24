@@ -4,6 +4,7 @@ executableName: DesktopCompanion
 asar: true
 asarUnpack:
   - assets/tray.png
+  - node_modules/koffi/build/koffi/win32_x64/**
 npmRebuild: false
 directories:
   output: release
@@ -12,6 +13,9 @@ files:
   - dist/**/*
   - assets/tray.png
   - "!node_modules/**"
+  - node_modules/koffi/package.json
+  - node_modules/koffi/index.js
+  - node_modules/koffi/build/koffi/win32_x64/**
   - "!**/*.map"
   - "!**/.local-asr/**"
   - "!**/docs/**"

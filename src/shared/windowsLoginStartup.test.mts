@@ -563,7 +563,9 @@ test('login startup stays in the main process and keeps the sandbox', () => {
 
 test('existing preference documents do not gain a startup field', () => {
   const parsed = parseUserPreferences('{"version":1,"neonTrailEnabled":true,"startAwake":false,"startWithWindows":true}');
-  assert.deepEqual(parsed.preferences, { version: 1, neonTrailEnabled: true, startAwake: false });
+  assert.equal(parsed.preferences.startAwake, false);
+  assert.equal(parsed.preferences.manualSleep, false);
+  assert.equal(parsed.preferences.followCursor, true);
   assert.equal(serializeUserPreferences(parsed.preferences).includes('startWithWindows'), false);
   assert.equal(read('src/shared/userPreferences.ts').includes('setLoginItemSettings'), false);
 });

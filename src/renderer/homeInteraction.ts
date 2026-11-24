@@ -1,3 +1,4 @@
+import { houseTooltip } from '../shared/houseGesture.ts';
 import { HOME, homeHit, homeOutlinePath } from '../shared/homeGeometry.ts';
 import type { HomeBridge } from '../shared/ipc.ts';
 
@@ -23,17 +24,20 @@ export function attachHome(elements: {
   };
   const ended = (): void => { button.classList.remove('feedback'); };
   const stop = bridge.onFeedback(value => {
-    if (value === 'idle' || value === 'busy' || value === 'docked') {
+    if (value === 'idle' || value === 'busy' || value === 'docked' || value === 'asleep') {
       for (const state of ['busy', 'docked', 'blocked']) button.classList.remove(state);
-      if (value !== 'idle') button.classList.add(value);
-      button.setAttribute('title', value === 'docked' ? 'Despertar y salir de la plataforma' :
-        value === 'busy' ? 'Acoplamiento en curso; Stop o Hide para cancelar' : 'Ir a la plataforma');
+      if (value === 'busy' || value === 'docked') button.classList.add(value);
+      const title = value === 'busy'
+        ? 'Docking. Use Stop or Hide to cancel.'
+        : houseTooltip(value === 'asleep' ? 'HOME_SLEEPING' : value === 'docked' ? 'HOME_AWAKE' : 'FREE_ROAM');
+      button.setAttribute('title', title);
+      button.setAttribute('aria-label', title);
       return;
     }
     button.classList.remove('blocked');
     if (value === 'blocked') {
       button.classList.add('blocked');
-      button.setAttribute('title', 'Movimiento no disponible: cierra el chat o detén la actividad de voz y vuelve a pulsar');
+      button.setAttribute('title', 'Movement is unavailable. Close chat or stop voice activity, then try again.');
     }
     button.classList.remove('feedback');
     void button.offsetWidth; // One event-triggered style flush; no frame/idle loop.

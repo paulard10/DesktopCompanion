@@ -2,14 +2,14 @@ import { COMPANION_LAYOUT } from './companionLayout.ts';
 import { chatTriggerHit, chatTriggerVisible } from './chatTrigger.ts';
 
 /**
- * A small screen-question button in the overlay's lower left, opposite the
- * chat badge and outside the body circle. The body click stays wake/chat.
+ * A small screen-question button beside the head, opposite the chat badge
+ * and above the home platform. The body click stays wake/chat.
  * The main process accepts it only while the robot is awake.
  */
 
 export const SCREEN_ASK_RADIUS_DIP = COMPANION_LAYOUT.chatBadgeDip.radius;
 /** Invisible target. The painted circle stays at SCREEN_ASK_RADIUS_DIP. */
-export const SCREEN_ASK_HIT_RADIUS_DIP = 30;
+export const SCREEN_ASK_HIT_RADIUS_DIP = 26;
 export const SCREEN_ASK_CENTER_X = COMPANION_LAYOUT.windowDip.width - COMPANION_LAYOUT.chatBadgeDip.centerX;
 export const SCREEN_ASK_CENTER_Y = COMPANION_LAYOUT.chatBadgeDip.centerY;
 

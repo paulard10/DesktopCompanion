@@ -43,7 +43,7 @@ after(() => avatar.dispose());
 
 const neutral: AvatarPose = { ...ambientPose(0), hover: 0, tiltX: 0, tiltZ: 0, antenna: 0 };
 
-function project(layout: CompanionLayout, pose: AvatarPose, checkArm = false, pulse = false, bodyOnly = false) {
+function project(layout: CompanionLayout, pose: AvatarPose, checkArm = false, pulse = false, bodyOnly = false, subject = avatar) {
   const { width, height } = layout.windowDip;
   const camera = new PerspectiveCamera(CAMERA_FOV_DEGREES, width / height, 0.1, 50);
   camera.position.z = cameraDistanceForBody({
@@ -51,15 +51,15 @@ function project(layout: CompanionLayout, pose: AvatarPose, checkArm = false, pu
     bodyRadiusWorld: BODY_RADIUS_WORLD, fovDegrees: CAMERA_FOV_DEGREES,
   });
   camera.updateMatrixWorld();
-  if (pulse) avatar.pulse(0);
-  avatar.apply(pose, pulse ? 90 : 1000);
-  avatar.object.updateMatrixWorld(true);
+  if (pulse) subject.pulse(0);
+  subject.apply(pose, pulse ? 90 : 1000);
+  subject.object.updateMatrixWorld(true);
   const bounds = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
   const point = new Vector3();
   const matrix = new Matrix4();
   const local = { x: 0, y: 0 };
   let armPoints = 0;
-  avatar.object.traverse(node => {
+  subject.object.traverse(node => {
     if (!('isMesh' in node) || !node.isMesh) return;
     if (bodyOnly && node.name !== 'Main body') return;
     const mesh = node as import('three').Mesh;
@@ -106,7 +106,7 @@ test('compact dimensions, proxy and independent camera mapping are exact', () =>
   assert.deepEqual(COMPACT_LAYOUT, {
     windowDip: { width: 216, height: 224 }, placementMarginDip: 16,
     cameraFramingDip: { bodyDiameter: 108 }, bodyProxyDip: { diameter: 108 },
-    chatBadgeDip: { centerX: 190, centerY: 198, radius: 18 },
+    chatBadgeDip: { centerX: 190, centerY: 92, radius: 18 },
     trailAnchorDip: { bodyRadius: 54 },
     armProxyDip: { fromX: 60, fromY: 0, toX: 72, toY: 42, radius: 25 },
   });
@@ -117,7 +117,9 @@ test('compact dimensions, proxy and independent camera mapping are exact', () =>
 });
 
 test('actual neutral mesh projects near 130 DIP high with the original proportions', t => {
-  const compact = project(COMPACT_LAYOUT, neutral, true);
+  const solo = createRobot();
+  const compact = project(COMPACT_LAYOUT, neutral, true, false, false, solo);
+  solo.dispose();
   const legacy = project(LEGACY_LAYOUT, neutral);
   assert.ok(Math.abs(compact.height - 130.64191923157043) < 1e-6);
   assert.ok(compact.height >= 125 && compact.height <= 135);
@@ -212,8 +214,8 @@ test('compact body/arms capture while corners and empty top/bottom regions pass 
 });
 
 test('badge stays readable, inside compact bounds, independent of body/arm proxies', () => {
-  assert.deepEqual(chatBadgeBoundsDip(), { x: 172, y: 180, width: 36, height: 36 });
-  for (const point of [[190, 198], [208, 198], [190, 180]]) {
+  assert.deepEqual(chatBadgeBoundsDip(), { x: 172, y: 74, width: 36, height: 36 });
+  for (const point of [[190, 92], [208, 92], [190, 74]]) {
     const [x, y] = point;
     assert.equal(chatTriggerHit(x!, y!), true);
     assert.equal(decision(x!, y!).mode, 'passthrough');
@@ -248,10 +250,12 @@ test('DPR refresh reuses the existing render loop without scaling input DIP or a
   assert.deepEqual(canvasBitmapSize(216, 224, 1.5), { width: 324, height: 336 });
   assert.deepEqual(canvasBitmapSize(216, 224, 2), { width: 432, height: 448 });
   const scene = read('src/renderer/avatar/createScene.ts');
-  const frame = scene.slice(scene.indexOf('const frame ='), scene.indexOf('const attachLoop ='));
+  const frame = scene.slice(scene.indexOf('const pump ='), scene.indexOf('const attachLoop ='));
   assert.match(frame, /renderer\.getPixelRatio\(\) !== Math\.min\(window\.devicePixelRatio \|\| 1, MAX_PIXEL_RATIO\)/);
   assert.ok(frame.indexOf('resize();') < frame.indexOf('renderer.render('));
-  assert.doesNotMatch(scene, /setInterval|setTimeout/);
+  assert.doesNotMatch(scene, /setInterval/);
+  assert.equal((scene.match(/window\.setTimeout/g) ?? []).length, 1);
+  assert.match(scene, /window\.setTimeout\(pump, SLEEP_FRAME_MS\)/);
 });
 
 test('compact mode retains lifecycle, existing window ownership and secure main-owned input', () => {

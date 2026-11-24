@@ -20,6 +20,12 @@ export function createTray(options: {
   isTrail: () => boolean;
   isStartAwake: () => boolean;
   onStartAwake?: (enabled: boolean) => void;
+  isAutonomous?: () => boolean;
+  onAutonomous?: (enabled: boolean) => void;
+  isReducedMotion?: () => boolean;
+  onReducedMotion?: (enabled: boolean) => void;
+  movementSpeed?: () => 'calm' | 'normal' | 'lively';
+  onMovementSpeed?: (speed: 'calm' | 'normal' | 'lively') => void;
   startupAvailable: boolean;
   isStartWithWindows: () => boolean;
   onStartWithWindows?: (enabled: boolean) => void;
@@ -98,6 +104,15 @@ export function createTray(options: {
         },
       },
       {
+        label: 'Autonomous Movement',
+        type: 'checkbox',
+        checked: options.isAutonomous?.() ?? true,
+        click: (item) => {
+          options.onAutonomous?.(Boolean(item.checked));
+          refresh();
+        },
+      },
+      {
         label: 'Show Home',
         type: 'checkbox',
         checked: options.isHome?.() ?? false,
@@ -114,13 +129,25 @@ export function createTray(options: {
         label: 'Preferences',
         submenu: [
           {
-            label: 'Start Awake',
+            label: 'Reduced Motion',
             type: 'checkbox',
-            checked: options.isStartAwake(),
+            checked: options.isReducedMotion?.() ?? false,
             click: (item) => {
-              options.onStartAwake?.(Boolean(item.checked));
+              options.onReducedMotion?.(Boolean(item.checked));
               refresh();
             },
+          },
+          {
+            label: 'Movement Speed',
+            submenu: (['calm', 'normal', 'lively'] as const).map((speed) => ({
+              label: speed === 'calm' ? 'Calm' : speed === 'lively' ? 'Lively' : 'Normal',
+              type: 'radio' as const,
+              checked: (options.movementSpeed?.() ?? 'normal') === speed,
+              click: () => {
+                options.onMovementSpeed?.(speed);
+                refresh();
+              },
+            })),
           },
           {
             label: startup.label,

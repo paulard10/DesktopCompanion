@@ -35,7 +35,7 @@ export const COMPACT_LAYOUT = {
   placementMarginDip: 16,
   cameraFramingDip: { bodyDiameter: 108 },
   bodyProxyDip: { diameter: 108 },
-  chatBadgeDip: { centerX: 190, centerY: 198, radius: 18 },
+    chatBadgeDip: { centerX: 190, centerY: 92, radius: 18 },
   trailAnchorDip: { bodyRadius: 54 },
   armProxyDip: { fromX: 60, fromY: 0, toX: 72, toY: 42, radius: 25 },
 } as const satisfies CompanionLayout;

@@ -29,10 +29,24 @@ function preferencesFile(directory: string): string {
 }
 
 test('safe defaults reject a missing, corrupt, or unsupported preferences file', () => {
-  assert.deepEqual(DEFAULT_USER_PREFERENCES, { version: 1, neonTrailEnabled: true, startAwake: false });
+  assert.equal(DEFAULT_USER_PREFERENCES.followCursor, true);
+  assert.equal(DEFAULT_USER_PREFERENCES.autonomousMovement, true);
+  assert.equal(DEFAULT_USER_PREFERENCES.manualSleep, false);
+  assert.equal(DEFAULT_USER_PREFERENCES.reducedMotion, false);
+  assert.equal(DEFAULT_USER_PREFERENCES.movementSpeed, 'normal');
+  assert.deepEqual(DEFAULT_USER_PREFERENCES, {
+    version: 1,
+    neonTrailEnabled: true,
+    startAwake: false,
+    manualSleep: false,
+    followCursor: true,
+    autonomousMovement: true,
+    reducedMotion: false,
+    movementSpeed: 'normal',
+  });
   assert.equal(parseUserPreferences('{"version":1,"neonTrailEnabled":false,"startAwake":false}').ok, true);
   const valid = parseUserPreferences('{"version":1,"neonTrailEnabled":true,"startAwake":true,"extra":"ignored"}');
-  assert.deepEqual(valid.preferences, { version: 1, neonTrailEnabled: true, startAwake: true });
+  assert.deepEqual(valid.preferences, { ...DEFAULT_USER_PREFERENCES, startAwake: true });
   assert.equal(Object.hasOwn(valid.preferences, 'extra'), false);
   const missingFields = parseUserPreferences('{"version":1}');
   assert.equal(missingFields.ok, true);
@@ -63,11 +77,7 @@ test('the preferences file survives a restart and a failed write', () => {
     const first = createUserPreferencesStore(filePath);
     assert.deepEqual(first.current(), DEFAULT_USER_PREFERENCES);
     assert.equal(existsSync(filePath), false);
-    assert.deepEqual(first.update({ startAwake: true }), {
-      version: 1,
-      neonTrailEnabled: true,
-      startAwake: true,
-    });
+    assert.deepEqual(first.update({ startAwake: true }), { ...DEFAULT_USER_PREFERENCES, startAwake: true });
     writeFileSync(decoy, '{"enabled":true,"autoRead":false}');
     writeFileSync(provider, '{"provider":"demo","endpoint":null}');
     writeFileSync(key, Buffer.from('sealed'));
@@ -75,7 +85,7 @@ test('the preferences file survives a restart and a failed write', () => {
     assert.equal(restarted.current().neonTrailEnabled, true);
     assert.equal(restarted.current().startAwake, true);
     assert.deepEqual(restarted.update({ neonTrailEnabled: false, startAwake: true }), {
-      version: 1,
+      ...DEFAULT_USER_PREFERENCES,
       neonTrailEnabled: false,
       startAwake: true,
     });
@@ -90,7 +100,7 @@ test('the preferences file survives a restart and a failed write', () => {
     }
     assert.equal(latest.neonTrailEnabled, false);
     const saved = parseUserPreferences(readFileSync(filePath, 'utf8'));
-    assert.deepEqual(saved.preferences, { version: 1, neonTrailEnabled: false, startAwake: true });
+    assert.deepEqual(saved.preferences, { ...DEFAULT_USER_PREFERENCES, neonTrailEnabled: false, startAwake: true });
     assert.equal(readFileSync(decoy, 'utf8'), '{"enabled":true,"autoRead":false}');
     assert.equal(readFileSync(provider, 'utf8'), '{"provider":"demo","endpoint":null}');
     assert.equal(readFileSync(key, 'utf8'), 'sealed');
@@ -131,11 +141,12 @@ test('startup restores the trail and start-awake choices without restoring wande
   const menu = main.indexOf('tray = createTray(');
   assert.ok(ready >= 0 && ready < overlay && overlay < wander && wander < trail && trail < restore && restore < menu);
   const firstFrame = main.slice(main.indexOf('onFirstFrame:'), main.indexOf('let wander: WanderState'));
-  assert.match(firstFrame, /preferenceStore\.current\(\)\.startAwake/);
+  assert.match(firstFrame, /!prefs\.manualSleep/);
   assert.match(firstFrame, /overlay\?\.wake\(\)/);
+  assert.match(firstFrame, /setFollowEnabled\(true\)/);
   assert.equal(firstFrame.includes('enableWander'), false);
   assert.equal(firstFrame.includes('chat?.open'), false);
-  assert.equal(firstFrame.includes('setEnabled'), false);
+  assert.equal(firstFrame.includes('home?.setEnabled'), false);
   const wake = main.slice(main.indexOf('onWander: (enabled)'), main.indexOf('onTrail: (action)'));
   assert.equal(wake.includes('preferenceStore'), false);
   assert.equal(wake.includes('user-preferences'), false);
@@ -157,8 +168,10 @@ test('startup restores the trail and start-awake choices without restoring wande
   assert.match(product, /label: 'Neon Trail'/);
   assert.match(product, /checked: options\.isTrail\(\)/);
   assert.match(product, /checked: options\.isWandering\(\)/);
-  assert.match(preferences, /label: 'Start Awake'/);
-  assert.match(preferences, /checked: options\.isStartAwake\(\)/);
+  assert.match(preferences, /label: 'Reduced Motion'/);
+  assert.match(preferences, /label: 'Movement Speed'/);
+  assert.match(product, /label: 'Autonomous Movement'/);
+  assert.match(product, /label: 'Follow Cursor'/);
   assert.equal(preferences.includes('Neon Trail'), false);
   assert.equal(preferences.includes('Wandering'), false);
   assert.equal(product.includes('Test window move'), false);

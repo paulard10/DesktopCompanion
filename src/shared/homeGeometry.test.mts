@@ -104,11 +104,15 @@ test('actual renderer binding synchronizes SVG/hit geometry, requires main feedb
   assert.equal(clicks, 1);
   feedback('busy'); assert.equal(button.classes.has('busy'),true); assert.equal(button.classes.has('feedback'),false);
   feedback('docked'); assert.equal(button.classes.has('docked'),true); assert.equal(button.classes.has('busy'),false);
+  assert.equal(button.attrs.title, 'Click: explore · Double-click: sleep');
   feedback('pulse'); assert.equal(button.classes.has('feedback'), true);
   button.emit('animationend'); assert.equal(button.classes.has('feedback'), false);
   assert.equal(button.classes.has('docked'),true, 'rest feedback remains static after the event pulse');
-  feedback('idle'); assert.equal(button.classes.has('docked'),false);
-  feedback('blocked'); assert.equal(button.classes.has('blocked'),true); assert.ok(button.attrs.title!.includes('no disponible'));
+  feedback('idle'); assert.equal(button.classes.has('docked'),false); assert.equal(button.attrs.title, 'Click: return home · Double-click: sleep');
+  feedback('asleep'); assert.equal(button.classes.has('docked'), false);
+  assert.equal(button.attrs.title, 'Click: wake up');
+  assert.equal(button.attrs['aria-label'], 'Click: wake up');
+  feedback('blocked'); assert.equal(button.classes.has('blocked'),true); assert.ok(button.attrs.title!.includes('unavailable'));
   dispose(); assert.equal(unsubscribed, 1); assert.equal(button.listenerCount('click'), 0);
   assert.equal(button.listenerCount('animationend'), 0);
 });

@@ -16,9 +16,10 @@ import { createTray } from './tray.js';
 import { readCopiedText } from './clipboardText.js';
 import { createInstalledLoginStartup } from './windowsLoginStartup.js';
 import { APP_USER_MODEL_ID } from '../shared/windowsLoginStartup.js';
-import { createUserPreferencesStore, type UserPreferencesStore } from '../shared/userPreferences.js';
+import { createUserPreferencesStore, movementScale, type MovementSpeed, type UserPreferencesStore } from '../shared/userPreferences.js';
 import { MOVE_TEST_DIP, travelBlock } from '../shared/desktopMovement.js';
-import { decideBedtime, quietDelayMs } from '../shared/activity.js';
+import { decideBedtime } from '../shared/activity.js';
+import { HOME_AWAKE_SLEEP_MS, HOUSE_DOUBLE_MS, houseAction, type CompanionMode } from '../shared/houseGesture.js';
 import { COMPANION_LAYOUT } from '../shared/companionLayout.js';
 import {
   WANDER_EXPLORE_MS,
@@ -68,6 +69,9 @@ let leaseTimer: ReturnType<typeof setTimeout> | null = null;
 let leaseEpoch = 0;
 let wanderClosed = false;
 let quietTimer: ReturnType<typeof setTimeout> | null = null;
+let houseTimer: ReturnType<typeof setTimeout> | null = null;
+let homeAwakeTimer: ReturnType<typeof setTimeout> | null = null;
+let homeAwake = false;
 let bedtime = false;
 
 function clearWanderTimer(): void {
@@ -93,6 +97,51 @@ function clearQuietTimer(): void {
   }
 }
 
+function clearHouseTimer(): void {
+  if (houseTimer) {
+    clearTimeout(houseTimer);
+    houseTimer = null;
+  }
+}
+
+function clearHomeAwakeTimer(): void {
+  if (homeAwakeTimer) {
+    clearTimeout(homeAwakeTimer);
+    homeAwakeTimer = null;
+  }
+}
+
+function currentMode(): CompanionMode {
+  const asleep = Boolean(preferences?.current().manualSleep) || Boolean(overlay?.wanderView()?.asleep);
+  if (asleep) return 'HOME_SLEEPING';
+  if (homeAwake || overlay?.dockingPhase() === 'docked') return 'HOME_AWAKE';
+  return 'FREE_ROAM';
+}
+
+function publishHouseTip(): void {
+  const phase = overlay?.dockingPhase() ?? 'undocked';
+  if (phase !== 'undocked' && phase !== 'docked') {
+    home?.feedback('busy');
+    return;
+  }
+  const mode = currentMode();
+  home?.feedback(mode === 'HOME_SLEEPING' ? 'asleep' : mode === 'HOME_AWAKE' ? 'docked' : 'idle');
+}
+
+function armHomeAwakeSleep(): void {
+  clearHomeAwakeTimer();
+  homeAwakeTimer = setTimeout(() => {
+    homeAwakeTimer = null;
+    const live = overlay;
+    if (quitting || !homeAwake || !live || live.dockingPhase() !== 'docked' || live.wanderView()?.asleep) return;
+    homeAwake = false;
+    rememberSleep(true);
+    console.log('desktop-companion: home-awake sleep');
+    live.sleep();
+  }, HOME_AWAKE_SLEEP_MS);
+  console.log('desktop-companion: home-awake sleep armed');
+}
+
 function userBusy(): boolean {
   if (selectionHolding) {
     return true;
@@ -102,14 +151,68 @@ function userBusy(): boolean {
 }
 
 function armQuiet(): void {
+  // Inactivity no longer sends the robot home or to sleep.
   clearQuietTimer();
-  if (quitting || bedtime || overlay?.wanderView()?.asleep) {
+}
+
+function rememberSleep(asleep: boolean): void {
+  preferences?.update({ manualSleep: asleep });
+}
+
+function applyLife(): void {
+  const prefs = preferences?.current();
+  if (!prefs) {
     return;
   }
-  quietTimer = setTimeout(() => {
-    quietTimer = null;
-    beginBedtime();
-  }, quietDelayMs());
+  overlay?.setLife({
+    autonomous: prefs.autonomousMovement,
+    reducedMotion: prefs.reducedMotion,
+    speed: movementScale(prefs.movementSpeed),
+  });
+}
+
+function restoreFollow(): void {
+  const prefs = preferences?.current();
+  if (!prefs || prefs.manualSleep || !prefs.followCursor || overlay?.dockingPhase() !== 'undocked') {
+    return;
+  }
+  overlay.setFollowEnabled(true);
+}
+
+function noteHomeWake(): void {
+  homeAwake = false;
+  clearHomeAwakeTimer();
+  rememberSleep(false);
+  publishHouseTip();
+}
+
+function noteHomeAwake(): void {
+  homeAwake = true;
+  clearHomeAwakeTimer();
+  rememberSleep(false);
+  overlay?.setFollowEnabled(false);
+  publishHouseTip();
+}
+
+function noteHomeSleep(): void {
+  homeAwake = false;
+  clearHomeAwakeTimer();
+  clearHouseTimer();
+  rememberSleep(true);
+  overlay?.setFollowEnabled(false);
+  publishHouseTip();
+}
+
+function noteHomeSleepFailed(): void {
+  homeAwake = false;
+  rememberSleep(false);
+  restoreFollow();
+}
+
+function resumeRoam(): void {
+  noteHomeWake();
+  overlay?.wake();
+  restoreFollow();
 }
 
 function noteActivity(): void {
@@ -184,6 +287,8 @@ async function shutdown(): Promise<void> {
   clearWanderTimer();
   clearLeaseTimer();
   clearQuietTimer();
+  clearHouseTimer();
+  clearHomeAwakeTimer();
   console.log('desktop-companion: quitting');
   if (smokeTimer) {
     clearTimeout(smokeTimer);
@@ -258,7 +363,10 @@ void app.whenReady().then(async () => {
     getWorkArea: (anchor) => screen.getDisplayMatching(anchor).workArea,
     onActivity: () => {
       bedtime = false;
+      clearHouseTimer();
+      noteHomeWake();
       overlay?.wake('chat');
+      restoreFollow();
       syncHold();
     },
     onQuiet: () => syncHold(),
@@ -278,13 +386,41 @@ void app.whenReady().then(async () => {
   home = createHomeWindow({
     dev: dev && !smoke,
     preloadPath: path.join(preloadPath(), '../homePreload.js'),
-    onEnabledChanged: () => tray?.refresh(),
+    onEnabledChanged: () => { tray?.refresh(); publishHouseTip(); },
     onActivate: () => {
       if (selectionHolding) return false;
       bedtime = false;
-      noteActivity();
+      clearHouseTimer();
+      houseTimer = setTimeout(() => {
+        if (quitting || selectionHolding) return;
+        const bounds = home?.getDockingBounds();
+        const action = houseAction(currentMode(), 'single');
+        if (action === 'dock-awake') {
+          noteHomeAwake();
+          if (bounds) overlay?.requestDocking(bounds, true, true);
+          return;
+        }
+        if (overlay?.dockingPhase() === 'docked') {
+          noteHomeWake();
+          if (bounds) overlay?.requestDocking(bounds);
+          return;
+        }
+        resumeRoam();
+      }, HOUSE_DOUBLE_MS);
+      return true;
+    },
+    onDoubleActivate: () => {
+      if (selectionHolding) return false;
+      clearHouseTimer();
+      bedtime = false;
+      const action = houseAction(currentMode(), 'double');
+      if (action === 'stay-asleep') return true;
       const bounds = home?.getDockingBounds();
-      return Boolean(bounds && overlay?.requestDocking(bounds));
+      noteHomeSleep();
+      if (overlay?.preferDockSleep()) return true;
+      const started = Boolean(bounds && overlay?.requestDocking(bounds, true));
+      if (!started) noteHomeSleepFailed();
+      return started;
     },
     onUnavailable: () => overlay?.cancelDocking('home-unavailable'),
     raiseAvatar: source => overlay?.moveAboveHome(source) ?? false,
@@ -305,12 +441,20 @@ void app.whenReady().then(async () => {
     getDockPlatform: () => home?.getDockingBounds() ?? null,
     onDockingStart: () => applyWander(disableWander(wander, overlay?.wanderView()?.travelPhase ?? 'idle')),
     onDockingChanged: phase => {
-      home?.feedback(phase === 'undocked' ? 'idle' : phase === 'docked' ? 'docked' : 'busy');
-      if (phase === 'docked') bedtime = false;
+      publishHouseTip();
+      if (phase === 'docked') {
+        bedtime = false;
+        if (homeAwake && !preferences?.current().manualSleep) armHomeAwakeSleep();
+      }
       if (phase === 'undocked' && bedtime) {
         bedtime = false;
         overlay?.sleep();
         return;
+      }
+      if (phase === 'undocked') {
+        homeAwake = false;
+        clearHomeAwakeTimer();
+        restoreFollow();
       }
       if (selectionHolding) return;
       if ((phase === 'returning' || phase === 'settling') && !bedtime) overlay?.setPresence('ATTENTIVE');
@@ -349,6 +493,10 @@ void app.whenReady().then(async () => {
         bedtime = false;
         overlay?.wake();
       }
+      if (overlay?.wanderView()?.asleep) {
+        rememberSleep(false);
+        restoreFollow();
+      }
       noteActivity();
       wander = noteWanderInteraction(wander);
       runWander();
@@ -358,10 +506,13 @@ void app.whenReady().then(async () => {
     onDisplayChanged: () => runWander(),
     onFirstFrame: () => {
       console.log('desktop-companion: frame-ready');
-      if (!quitting && preferenceStore.current().startAwake) {
+      const prefs = preferenceStore.current();
+      applyLife();
+      if (!quitting && !prefs.manualSleep) {
         overlay?.wake();
-        noteActivity();
+        if (!smoke && prefs.followCursor) overlay?.setFollowEnabled(true);
       }
+      publishHouseTip();
       if (!smoke) {
         return;
       }
@@ -614,13 +765,19 @@ void app.whenReady().then(async () => {
     onHide: () => { selection?.cancel(); overlay?.hide(); },
     onWake: () => {
       bedtime = false;
+      clearHouseTimer();
+      noteHomeWake();
       selection?.cancel();
       overlay?.show();
+      const docked = overlay?.dockingPhase() === 'docked';
       overlay?.wake();
+      if (!docked) restoreFollow();
       noteActivity();
     },
     onSleep: () => {
       bedtime = false;
+      clearHouseTimer();
+      noteHomeSleep();
       clearQuietTimer();
       chat?.stopVoice();
       selection?.cancel();
@@ -657,10 +814,26 @@ void app.whenReady().then(async () => {
     onFollow: (enabled) => {
       selection?.cancel();
       if (!overlay) return;
+      preferenceStore.update({ followCursor: enabled });
       if (enabled) {
         applyWander(disableWander(wander, overlay.wanderView()?.travelPhase ?? 'idle'));
       }
       overlay.setFollowEnabled(enabled);
+    },
+    isAutonomous: () => preferenceStore.current().autonomousMovement,
+    onAutonomous: (enabled) => {
+      preferenceStore.update({ autonomousMovement: enabled });
+      applyLife();
+    },
+    isReducedMotion: () => preferenceStore.current().reducedMotion,
+    onReducedMotion: (enabled) => {
+      preferenceStore.update({ reducedMotion: enabled });
+      applyLife();
+    },
+    movementSpeed: () => preferenceStore.current().movementSpeed,
+    onMovementSpeed: (speed: MovementSpeed) => {
+      preferenceStore.update({ movementSpeed: speed });
+      applyLife();
     },
     isHome: () => home?.isEnabled() ?? false,
     onHome: (enabled) => { selection?.cancel(); home?.setEnabled(enabled); },

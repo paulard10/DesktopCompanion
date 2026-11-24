@@ -182,7 +182,7 @@ function safeSegment(from: FollowPoint, to: FollowPoint, view: FollowView, curso
 }
 
 /** Fractional integration. Safety stops may zero velocity; ordinary braking is bounded. */
-export function stepFollow(state: FollowState, view: FollowView, now: number): FollowState {
+export function stepFollow(state: FollowState, view: FollowView, now: number, speedScale = 1): FollowState {
   if (!state.enabled || state.phase !== 'moving') return state;
   const block = gate(state, view, now);
   if (block) return holdFollow(state, now, block);
@@ -190,9 +190,13 @@ export function stepFollow(state: FollowState, view: FollowView, now: number): F
   if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > FOLLOW.staleMs) return holdFollow(state, now, 'clock-gap');
   const dt = Math.min(elapsed, FOLLOW.maxStepMs) / 1000;
   if (dt <= 0) return state;
+  const scale = Number.isFinite(speedScale) && speedScale > 0 ? Math.min(1.5, speedScale) : 1;
+  const cruise = FOLLOW.cruiseSpeed * scale;
+  const fastest = FOLLOW.maxSpeed * scale;
+  const acceleration = FOLLOW.acceleration * scale;
   const dx = state.target ? state.target.x - state.x : 0, dy = state.target ? state.target.y - state.y : 0;
   const distance = Math.hypot(dx, dy), oldSpeed = Math.hypot(state.vx, state.vy);
-  if (state.target && distance <= FOLLOW.arrivalDip && oldSpeed < FOLLOW.arrivalSpeed && oldSpeed <= FOLLOW.acceleration * dt) {
+  if (state.target && distance <= FOLLOW.arrivalDip && oldSpeed < FOLLOW.arrivalSpeed * scale && oldSpeed <= acceleration * dt) {
     // Wait for the next paced target update without resetting entry hysteresis
     // while the pointer is still deliberately moving. Idle arrival really stops.
     if (now - state.lastMotionAt < FOLLOW.decisionMs) return { ...state, vx: 0, vy: 0, lastTickAt: now };
@@ -201,11 +205,11 @@ export function stepFollow(state: FollowState, view: FollowView, now: number): F
       boutUntil: null, stoppedAt: now, lastTickAt: now };
   }
   const catchup = clamp((distance - FOLLOW.catchupStartDip) / (FOLLOW.catchupFullDip - FOLLOW.catchupStartDip), 0, 1);
-  const desiredSpeed = FOLLOW.cruiseSpeed + catchup * (FOLLOW.maxSpeed - FOLLOW.cruiseSpeed);
-  const speed = state.target ? Math.min(FOLLOW.maxSpeed, desiredSpeed, Math.sqrt(2 * FOLLOW.acceleration * Math.max(0, distance - FOLLOW.arrivalDip))) : 0;
+  const desiredSpeed = cruise + catchup * (fastest - cruise);
+  const speed = state.target ? Math.min(fastest, desiredSpeed, Math.sqrt(2 * acceleration * Math.max(0, distance - FOLLOW.arrivalDip))) : 0;
   const desiredX = distance > 0 ? dx / distance * speed : 0, desiredY = distance > 0 ? dy / distance * speed : 0;
   const change = Math.hypot(desiredX - state.vx, desiredY - state.vy);
-  const mix = change > 0 ? Math.min(1, FOLLOW.acceleration * dt / change) : 1;
+  const mix = change > 0 ? Math.min(1, acceleration * dt / change) : 1;
   const vx = state.vx + (desiredX - state.vx) * mix, vy = state.vy + (desiredY - state.vy) * mix;
   const area = view.workArea!;
   const next = { x: state.x + vx * dt, y: state.y + vy * dt };

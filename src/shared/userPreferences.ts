@@ -5,17 +5,42 @@ import path from 'node:path';
 
 export const USER_PREFERENCES_VERSION = 1;
 
+export const MOVEMENT_SPEEDS = ['calm', 'normal', 'lively'] as const;
+export type MovementSpeed = (typeof MOVEMENT_SPEEDS)[number];
+
 export interface UserPreferences {
   version: 1;
   neonTrailEnabled: boolean;
+  /** Kept so older files still parse. Launch uses manualSleep. */
   startAwake: boolean;
+  /** Set only by an explicit sleep. Cleared on an explicit wake. */
+  manualSleep: boolean;
+  followCursor: boolean;
+  autonomousMovement: boolean;
+  reducedMotion: boolean;
+  movementSpeed: MovementSpeed;
 }
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   version: USER_PREFERENCES_VERSION,
   neonTrailEnabled: true,
   startAwake: false,
+  manualSleep: false,
+  followCursor: true,
+  autonomousMovement: true,
+  reducedMotion: false,
+  movementSpeed: 'normal',
 };
+
+export function movementScale(speed: MovementSpeed): number {
+  if (speed === 'calm') {
+    return 0.72;
+  }
+  if (speed === 'lively') {
+    return 1.28;
+  }
+  return 1;
+}
 
 export interface PreferenceDocument {
   ok: boolean;
@@ -44,6 +69,11 @@ export function parseUserPreferences(raw: string): PreferenceDocument {
       version: USER_PREFERENCES_VERSION,
       neonTrailEnabled: booleanOr(record.neonTrailEnabled, true),
       startAwake: booleanOr(record.startAwake, false),
+      manualSleep: booleanOr(record.manualSleep, false),
+      followCursor: booleanOr(record.followCursor, true),
+      autonomousMovement: booleanOr(record.autonomousMovement, true),
+      reducedMotion: booleanOr(record.reducedMotion, false),
+      movementSpeed: speedOr(record.movementSpeed),
     },
   };
 }
@@ -53,11 +83,20 @@ export function serializeUserPreferences(preferences: UserPreferences): string {
     version: USER_PREFERENCES_VERSION,
     neonTrailEnabled: preferences.neonTrailEnabled === true,
     startAwake: preferences.startAwake === true,
+    manualSleep: preferences.manualSleep === true,
+    followCursor: preferences.followCursor === true,
+    autonomousMovement: preferences.autonomousMovement === true,
+    reducedMotion: preferences.reducedMotion === true,
+    movementSpeed: speedOr(preferences.movementSpeed),
   });
 }
 
 function booleanOr(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
+}
+
+function speedOr(value: unknown): MovementSpeed {
+  return value === 'calm' || value === 'lively' || value === 'normal' ? value : 'normal';
 }
 
 function rejected(reason: PreferenceDocument['reason']): PreferenceDocument {
@@ -66,7 +105,7 @@ function rejected(reason: PreferenceDocument['reason']): PreferenceDocument {
 
 export interface UserPreferencesStore {
   current(): UserPreferences;
-  update(patch: Partial<Pick<UserPreferences, 'neonTrailEnabled' | 'startAwake'>>): UserPreferences;
+  update(patch: Partial<Omit<UserPreferences, 'version'>>): UserPreferences;
   close(): void;
 }
 
@@ -89,8 +128,13 @@ export function createUserPreferencesStore(
         version: USER_PREFERENCES_VERSION,
         neonTrailEnabled: patch.neonTrailEnabled ?? state.neonTrailEnabled,
         startAwake: patch.startAwake ?? state.startAwake,
+        manualSleep: patch.manualSleep ?? state.manualSleep,
+        followCursor: patch.followCursor ?? state.followCursor,
+        autonomousMovement: patch.autonomousMovement ?? state.autonomousMovement,
+        reducedMotion: patch.reducedMotion ?? state.reducedMotion,
+        movementSpeed: patch.movementSpeed ?? state.movementSpeed,
       };
-      if (next.neonTrailEnabled === state.neonTrailEnabled && next.startAwake === state.startAwake) {
+      if (samePreferences(next, state)) {
         return state;
       }
       try {
@@ -106,6 +150,18 @@ export function createUserPreferencesStore(
       closed = true;
     },
   };
+}
+
+function samePreferences(left: UserPreferences, right: UserPreferences): boolean {
+  return (
+    left.neonTrailEnabled === right.neonTrailEnabled &&
+    left.startAwake === right.startAwake &&
+    left.manualSleep === right.manualSleep &&
+    left.followCursor === right.followCursor &&
+    left.autonomousMovement === right.autonomousMovement &&
+    left.reducedMotion === right.reducedMotion &&
+    left.movementSpeed === right.movementSpeed
+  );
 }
 
 function loadPreferences(filePath: string): UserPreferences {

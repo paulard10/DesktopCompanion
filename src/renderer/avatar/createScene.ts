@@ -1,12 +1,16 @@
 import {
   ACESFilmicToneMapping,
+  CanvasTexture,
   DirectionalLight,
   HemisphereLight,
   PerspectiveCamera,
   Scene,
+  Sprite,
+  SpriteMaterial,
   SRGBColorSpace,
   WebGLRenderer,
 } from 'three';
+import { createSleepMarks, writeSleepMarks } from '../../shared/sleepZzz';
 import { COMPANION_LAYOUT } from '../../shared/companionLayout';
 import { SLEEP_FRAME_MS } from '../../shared/behavior';
 import type { RobotGesture } from '../../shared/gesturePose';
@@ -78,6 +82,7 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
   const avatar: AvatarAdapter = createProceduralRobot();
   const director = createCharacterDirector();
   scene.add(avatar.object);
+  const sleepMarks = attachSleepMarks(scene);
 
   const resize = (): void => {
     const width = Math.max(window.innerWidth, 1);
@@ -128,6 +133,7 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
       const next = director.step(now);
       if (next.render) {
         avatar.apply(next.pose, now);
+        sleepMarks.sync(now, next.phase === 'SLEEPING', director.prefersCalm());
         renderer.render(scene, camera);
       }
       if (director.isSleeping()) {
@@ -298,9 +304,68 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
       detachLoop();
       window.removeEventListener('resize', resize);
       avatar.dispose();
+      sleepMarks.dispose();
       renderer.dispose();
     },
   };
+}
+
+function attachSleepMarks(scene: Scene): { sync: (now: number, sleeping: boolean, calm: boolean) => void; dispose: () => void } {
+  const marks = createSleepMarks();
+  const texture = zTexture();
+  const sprites = marks.map(() => {
+    const material = new SpriteMaterial({ map: texture, transparent: true, depthWrite: false, opacity: 0, color: 0xffffff });
+    const sprite = new Sprite(material);
+    sprite.visible = false;
+    sprite.position.set(0.3, 1.3, 0.4);
+    scene.add(sprite);
+    return { sprite, material };
+  });
+  return {
+    sync(now: number, sleeping: boolean, calm: boolean): void {
+      writeSleepMarks(now, sleeping, calm, marks);
+      for (let index = 0; index < sprites.length; index += 1) {
+        const pose = marks[index];
+        const item = sprites[index];
+        if (!pose || !item) {
+          continue;
+        }
+        const show = pose.visible && pose.opacity > 0.04;
+        item.sprite.visible = show;
+        if (!show) {
+          continue;
+        }
+        item.sprite.position.set(pose.x, pose.y, 0.4);
+        item.sprite.scale.set(pose.scale, pose.scale, 1);
+        item.material.opacity = pose.opacity;
+      }
+    },
+    dispose(): void {
+      for (const item of sprites) {
+        scene.remove(item.sprite);
+        item.material.dispose();
+      }
+      texture.dispose();
+    },
+  };
+}
+
+function zTexture(): CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 96;
+  canvas.height = 96;
+  const context = canvas.getContext('2d');
+  if (context) {
+    context.clearRect(0, 0, 96, 96);
+    context.fillStyle = '#d7ff63';
+    context.font = '700 72px sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText('z', 48, 52);
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
 }
 
 function errorName(error: unknown): string {

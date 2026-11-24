@@ -7,9 +7,9 @@ Desktop Companion is an Electron overlay: a transparent window, a procedural rob
 ## What it does
 
 - **A procedural robot.** White shell, black face, and matching neon-green eyes, drawn with Three.js. It blinks, changes expression, and adds small gestures while it is awake.
-- **Wake and sleep.** It starts asleep. Click the body, or choose Wake in the tray. After about two minutes without a real interaction it looks sleepy, glides back to Home, docks, and sleeps. Follow Cursor keeps it awake while the pointer is actually moving. Chat, a screen selection, and a Qwen request do too. Moving the cursor does not wake it once it is asleep. Tray Sleep still sleeps immediately.
-- **Follow Cursor.** Turn this on from the tray and the robot glides after the pointer, with a lean, a small bank, and a lagging antenna.
-- **Home.** A dock is visible by default. The robot can return there and sleep.
+- **Wake and sleep.** It starts awake. Sleep is something you choose: double-click Home, or choose Sleep in the tray. It also falls asleep on its own after one minute sitting awake at Home. That sleep is remembered, so a restart stays asleep until you wake it. Moving the cursor does not wake it.
+- **Follow Cursor.** This is on unless you turn it off in the tray. The robot glides after the pointer, with a lean, a small bank, and a lagging antenna. It resumes after you wake it. It stays put while the robot is asleep.
+- **Home.** The platform has three modes. While roaming, one click returns home awake and a double click sleeps. Awake at home, one click goes back out and a double click sleeps. Asleep, one click wakes it and it leaves; a double click leaves it asleep. The platform tooltip names the click for the current mode.
 - **Neon trail.** While it travels, it leaves a short neon trail. The trail stops when the robot is asleep.
 - **Chat.** Open it from the badge, a second click on an awake robot, or the tray. The window is a short conversation: messages, one text box, an attachment button, a microphone, and Send. Connection details and extra voice options stay in Settings. Demo mode answers locally and sends nothing over the network.
 - **Ask about copied text.** Copy text in another app, then choose the command from the tray or the chat attachment menu. The chat shows that text. Choose Explain, Summarize, Translate, or Ask anything, review it, and press Send. Copying alone does not open the feature or send anything.
@@ -179,8 +179,8 @@ During that session, free memory stayed under 1,024 MB, so Whisper would have re
 
 - Windows only. There is no macOS or Linux build.
 - No signed installer is published.
-- Follow Cursor stays off until you enable it.
-- The robot sleeps after about two minutes of quiet. Meaningful follow, chat, screen selection, and an in-progress Qwen request postpone that. Cursor movement does not wake a sleeping robot. If Home is hidden, it sleeps in place.
+- Follow Cursor is on unless you turn it off. It does not run while the robot is asleep, and cursor movement does not wake it.
+- Free roam does not fall asleep from inactivity. The one-minute sleep happens only after the robot has finished docking and is still awake at Home.
 - Click-through can fail against an elevated window. The tray has a temporary whole-window recovery switch for that case.
 - Voice needs the local Whisper files described above and a Windows voice for Spanish or English. Recordings are not stored. Transcription refuses to start when free memory is below 1,024 MB. On an 8 GB PC that is already busy, that free memory may not be available even though the companion itself is not leaking.
 - Sleeping uses less CPU than a full-speed frame loop, and the robot still draws a slow breathing frame. Awake animation stays at the display rate. The performance figures above are one development PC. They do not include Follow Cursor, a voice session, or a long-running leak test.

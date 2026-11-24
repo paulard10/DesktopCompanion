@@ -155,10 +155,13 @@ export function secondarySampleInto(
     out.antennaSway = 0.1 * envelope;
   }
   if (wakeAge >= 0 && wakeAge < WAKE_PREVIEW_MS) {
-    const slumped = 1 - smooth(wakeAge / WAKE_PREVIEW_MS);
-    out.antennaSway -= 0.05 * slumped;
-    out.leftArmLift -= 0.04 * slumped;
-    out.rightArmLift -= 0.04 * slumped;
+    const t = wakeAge / WAKE_PREVIEW_MS;
+    const slumped = 1 - smooth(t);
+    const stretch = Math.sin(t * Math.PI);
+    out.antennaSway += -0.05 * slumped + 0.16 * stretch;
+    out.leftArmLift += -0.04 * slumped + 0.2 * stretch;
+    out.rightArmLift += -0.04 * slumped + 0.2 * stretch;
+    out.bodyBob += 0.03 * stretch;
   }
   scaleAwake(out, awake);
   clampPose(out);

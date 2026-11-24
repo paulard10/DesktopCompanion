@@ -44,6 +44,7 @@ import {
 } from '../../shared/secondaryMotion';
 import { RIG_PROBE_MS, type RigProbeName } from '../../shared/rigProbe';
 import { applyIdleEyes, idleBeat } from '../../shared/idlePersonality';
+import { LIFE_STILL_MS } from '../../shared/life';
 
 export interface CharacterFrame {
   pose: AvatarPose;
@@ -66,6 +67,7 @@ export interface CharacterDirector {
   setTravel(moving: boolean): void;
   isAwake(): boolean;
   isSleeping(): boolean;
+  prefersCalm(): boolean;
   onPhase(listener: (phase: Phase) => void): void;
   step(now: number): CharacterFrame;
 }
@@ -77,6 +79,10 @@ export function createCharacterDirector(): CharacterDirector {
   let gaze: Gaze = { ...REST_GAZE };
   let sample: CursorSample | null = null;
   let sampleSeenAt = Number.NEGATIVE_INFINITY;
+  let stillX = 0;
+  let stillY = 0;
+  let stillSince = 0;
+  let userCalm = false;
   let lastRenderAt = Number.NEGATIVE_INFINITY;
   let gesture: { name: RobotGesture; started: number } | null = null;
   let presence: PresenceName | null = null;
@@ -156,8 +162,21 @@ export function createCharacterDirector(): CharacterDirector {
       commit(reduceBehavior(behavior, { type: 'EXPLORE', until: now + durationMs }, now));
     },
     noteCursor(next: CursorSample): void {
+      const now = performance.now();
+      if (next.calm === true || next.calm === false) {
+        userCalm = next.calm;
+      }
+      if (sample && (next.x - stillX) ** 2 + (next.y - stillY) ** 2 >= 36) {
+        stillX = next.x;
+        stillY = next.y;
+        stillSince = now;
+      } else if (stillSince === 0) {
+        stillX = next.x;
+        stillY = next.y;
+        stillSince = now;
+      }
       sample = next;
-      sampleSeenAt = performance.now();
+      sampleSeenAt = now;
     },
     playGesture(name: RobotGesture, now: number): void {
       gesture = { name, started: now };
@@ -220,6 +239,9 @@ export function createCharacterDirector(): CharacterDirector {
     isSleeping(): boolean {
       return behavior.phase === 'SLEEPING';
     },
+    prefersCalm(): boolean {
+      return userCalm || prefersReducedMotion();
+    },
     onPhase(listener: (phase: Phase) => void): void {
       phaseListener = listener;
       listener(behavior.phase);
@@ -257,7 +279,8 @@ export function createCharacterDirector(): CharacterDirector {
           : REST_GAZE;
       gaze = stepGaze(gaze, target, now - previousTick);
       const level = alertness(behavior, now);
-      const reducedMotion = prefersReducedMotion();
+      const reducedMotion = userCalm || prefersReducedMotion();
+      const cursorStill = freshCursor(now) && now - stillSince >= LIFE_STILL_MS;
       if (behavior.phase === 'SLEEPING' || behavior.phase === 'RETURNING_TO_SLEEP') {
         preview = null;
         dozing = false;
@@ -271,10 +294,23 @@ export function createCharacterDirector(): CharacterDirector {
         preview,
       });
       writeEyeTarget(cue, now, reducedMotion, eyeGoal);
-      const canIdle = cue === 'IDLE' && behavior.phase === 'IDLE' && presence === null && !traveling && !reducedMotion && !dozing;
+      const canIdle =
+        cue === 'IDLE' &&
+        (behavior.phase === 'IDLE' || (cursorStill && behavior.phase === 'TRACKING')) &&
+        presence === null &&
+        !traveling &&
+        !reducedMotion &&
+        !dozing;
       const beat = canIdle ? idleBeat(now) : null;
       if (beat?.active) {
         applyIdleEyes(eyeGoal, beat.act);
+      } else if (cursorStill && sample && cue === 'IDLE' && !reducedMotion) {
+        const dx = sample.x - (sample.originX + sample.width / 2);
+        const dy = sample.y - (sample.originY + sample.height / 2);
+        if (dx * dx + dy * dy < 280 * 280) {
+          eyeGoal.left.openness = 1.12;
+          eyeGoal.right.openness = 1.12;
+        }
       }
       if (dozing && (cue === 'IDLE' || cue === 'CURIOUS')) {
         eyeGoal.left.openness = 0.72;
@@ -295,9 +331,13 @@ export function createCharacterDirector(): CharacterDirector {
         rigProbe = null;
       }
       noteSecondaryCue(secondaryClock, cue, now, sleeping);
-      if (beat?.active && beat.slot !== idleMarked && secondaryClock.gesture === 'none' && (beat.act === 'wave' || beat.act === 'happy')) {
+      if (beat?.active && beat.slot !== idleMarked && secondaryClock.gesture === 'none' && beat.act !== 'rest' && beat.act !== 'glance' && beat.act !== 'lookup') {
         idleMarked = beat.slot;
-        secondaryClock.gesture = beat.act === 'wave' ? 'wave' : 'bounce';
+        secondaryClock.gesture = beat.act === 'wave' || beat.act === 'antenna' || beat.act === 'turn'
+          ? 'wave'
+          : beat.act === 'stretch' || beat.act === 'tilt'
+            ? 'nod'
+            : 'bounce';
         secondaryClock.startedAt = now;
       }
       if (secondaryClock.gesture !== 'none' && now - secondaryClock.startedAt >= gestureDuration(secondaryClock.gesture)) {
@@ -314,6 +354,12 @@ export function createCharacterDirector(): CharacterDirector {
         reducedMotion,
         wakeAge,
       );
+      if (!sleeping && !reducedMotion && sample && freshCursor(now)) {
+        const dx = sample.x - (sample.originX + sample.width / 2);
+        const lean = Math.max(-0.045, Math.min(0.045, dx / 900));
+        secondaryGoal.bodyTilt = Math.max(-0.08, Math.min(0.08, secondaryGoal.bodyTilt + lean));
+        secondaryGoal.headTilt = Math.max(-0.08, Math.min(0.08, secondaryGoal.headTilt + lean * 0.65));
+      }
       stepSecondaryInto(secondary, secondary, secondaryGoal, now - previousTick);
       const poseId = secondaryPoseId(
         cue,

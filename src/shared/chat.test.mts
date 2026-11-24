@@ -101,9 +101,9 @@ test('the chat trigger is outside the body circle and misses every corner', () =
   }
   const triggerStyle = { left: '', top: '', width: '', height: '' };
   applyChatBadgeLayout(triggerStyle);
-  assert.deepEqual(triggerStyle, { left: '172px', top: '180px', width: '36px', height: '36px' });
+  assert.deepEqual(triggerStyle, { left: '172px', top: '74px', width: '36px', height: '36px' });
   assert.equal(CHAT_TRIGGER_CENTER_X - CHAT_TRIGGER_RADIUS_DIP, 172);
-  assert.equal(CHAT_TRIGGER_CENTER_Y - CHAT_TRIGGER_RADIUS_DIP, 180);
+  assert.equal(CHAT_TRIGGER_CENTER_Y - CHAT_TRIGGER_RADIUS_DIP, 74);
   assert.equal(chatTriggerHit(CHAT_TRIGGER_CENTER_X, CHAT_TRIGGER_CENTER_Y), true);
   assert.equal(chatTriggerVisible('SLEEPING'), false);
   assert.equal(chatTriggerVisible('RETURNING_TO_SLEEP'), false);

@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain, screen, type IpcMainEvent } from 'electron';
+import { HOUSE_DOUBLE_MS, HOUSE_REPEAT_MS } from '../shared/houseGesture.js';
 import { HOME, homeCaptures, type HomeCursorObservation, type HomeRect } from '../shared/homeGeometry.js';
 import { placeDockableHome } from '../shared/dockingGeometry.js';
 import { IpcChannels, type HomeFeedback } from '../shared/ipc.js';
@@ -22,6 +23,7 @@ export function createHomeWindow(options: {
   preloadPath: string;
   onEnabledChanged?: () => void;
   onActivate?: () => boolean;
+  onDoubleActivate?: () => boolean;
   onUnavailable?: () => void;
   raiseAvatar?: (source: string) => boolean;
 }): HomeController {
@@ -31,6 +33,7 @@ export function createHomeWindow(options: {
   let last: HomeCursorObservation | null = null;
   let sampledBounds: HomeRect | null = null;
   let lastClickAt = -Infinity;
+  let announced: HomeFeedback | null = null;
   let loadDeadline: ReturnType<typeof setTimeout> | null = null;
   const page = options.dev ? 'http://127.0.0.1:5173/home.html' : 'app://companion/home.html';
 
@@ -48,10 +51,13 @@ export function createHomeWindow(options: {
     try {
       const now = performance.now(), bounds = win.getBounds();
       if (!sameBounds(bounds, sampledBounds) || !homeCaptures(last, bounds, now, true) ||
-          now - lastClickAt < HOME.clickGapMs) return;
+          now - lastClickAt < HOUSE_REPEAT_MS) return;
+      const second = now - lastClickAt <= HOUSE_DOUBLE_MS;
       lastClickAt = now;
       if (!raiseAvatar()) { failClosed(); return; }
-      const accepted = options.onActivate?.() ?? true;
+      const accepted = second && options.onDoubleActivate
+        ? options.onDoubleActivate()
+        : options.onActivate?.() ?? true;
       feedback(accepted ? 'pulse' : 'blocked');
     } catch { failClosed(); }
   };
@@ -84,7 +90,7 @@ export function createHomeWindow(options: {
     screen.removeListener('display-metrics-changed', reposition);
     const previous = win;
     win = null; ready = false; painted = false; capturing = false;
-    last = null; sampledBounds = null; lastClickAt = -Infinity;
+    last = null; sampledBounds = null; lastClickAt = -Infinity; announced = null;
     if (previous) options.onUnavailable?.();
     if (previous && !previous.isDestroyed()) {
       try { previous.setIgnoreMouseEvents(true); } catch { /* Destruction still releases input. */ }
@@ -104,6 +110,7 @@ export function createHomeWindow(options: {
       release();
       win.setBackgroundColor('#00000000');
       win.showInactive();
+      deliver();
       if (!raiseAvatar()) failClosed();
     } catch { failClosed(); }
   }
@@ -151,13 +158,17 @@ export function createHomeWindow(options: {
     if (!options.raiseAvatar) return true;
     return Boolean(win && !win.isDestroyed() && options.raiseAvatar(win.getMediaSourceId()));
   }
-  function feedback(value: HomeFeedback): void {
-    if (!win || win.isDestroyed() || !ready || !painted || !win.isVisible()) return;
+  function deliver(): void {
+    if (!announced || !win || win.isDestroyed() || !ready || !painted || !win.isVisible()) return;
     try {
-      if (value === 'docked' && !raiseAvatar()) { failClosed(); return; }
-      win.webContents.send(IpcChannels.homeFeedback, value);
+      if (announced === 'docked' && !raiseAvatar()) { failClosed(); return; }
+      win.webContents.send(IpcChannels.homeFeedback, announced);
     }
     catch { failClosed(); }
+  }
+  function feedback(value: HomeFeedback): void {
+    announced = value;
+    deliver();
   }
 
   return {

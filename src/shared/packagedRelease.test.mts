@@ -80,6 +80,16 @@ test('the Windows package allowlist keeps secrets, Whisper, and research out of 
   assert.match(config, /- assets\/tray\.png/);
   assert.match(config, /publish: null/);
   assert.match(config, /!node_modules\/\*\*/);
+  assert.match(config, /node_modules\/koffi\/package\.json/);
+  assert.match(config, /node_modules\/koffi\/index\.js/);
+  assert.match(config, /node_modules\/koffi\/build\/koffi\/win32_x64\/\*\*/);
+  const exclusion = config.indexOf('!node_modules/**');
+  const koffiInclude = config.indexOf('node_modules/koffi/package.json');
+  assert.ok(exclusion !== -1 && koffiInclude > exclusion);
+  const busy = read('src/main/pointerBusy.ts');
+  assert.match(busy, /GetAsyncKeyState\(int\)/);
+  assert.equal(busy.includes('console.'), false);
+  assert.equal(busy.includes('read(key)'), true);
   assert.match(config, /!\*\*\/\*\.map/);
   assert.match(config, /extraResources: \[\]/);
   for (const forbidden of ['.local-asr', 'qwen-key.bin', 'provider-settings.json', 'tts-settings.json', 'user-preferences.json', 'ggml-tiny.bin', 'whisper-cli.exe', '.env']) {

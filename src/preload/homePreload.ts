@@ -7,7 +7,7 @@ const bridge: HomeBridge = {
   notifyClick() { ipcRenderer.send('home:click'); },
   onFeedback(listener) {
     const receive = (_event: unknown, value: unknown): void => {
-      if (value === 'pulse' || value === 'busy' || value === 'docked' || value === 'idle' || value === 'blocked') listener(value);
+      if (value === 'pulse' || value === 'busy' || value === 'docked' || value === 'idle' || value === 'asleep' || value === 'blocked') listener(value);
     };
     ipcRenderer.on('home:feedback', receive);
     return () => { ipcRenderer.removeListener('home:feedback', receive); };

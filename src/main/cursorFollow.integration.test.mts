@@ -189,20 +189,27 @@ test('Hide clears both intervals; Show resumes only through the existing sampler
   f.controller.show(); f.advance(200); assert.equal(f.win.moves.length, before);
   f.advance(1800); assert.ok(f.win.moves.length > before);
 });
-test('display metrics change disables follow and requires a fresh explicit opt-in', t => {
+test('display metrics change rebinds follow on the new work area', t => {
   const f = fixture(t);
   f.controller.setFollowEnabled(true); f.advance(1600);
   screen.emit('display-metrics-changed');
-  assert.equal(f.controller.isFollowing(), false);
+  assert.equal(f.controller.isFollowing(), true);
   const before = f.win.moves.length; f.advance(800);
-  assert.equal(f.win.moves.length, before);
+  assert.ok(f.win.moves.length >= before);
 });
-test('reduced motion prevents follow and recovery retains whole-window input', t => {
-  const f = fixture(t); reduced = true;
+test('the user reduced-motion preference prevents follow and recovery retains whole-window input', t => {
+  const f = fixture(t);
+  f.controller.setLife({ autonomous: false, reducedMotion: true, speed: 1 });
   f.controller.setFollowEnabled(true); f.advance(1500);
   assert.equal(f.win.moves.length, 0);
   f.controller.setRecoveryCapture(true);
   assert.equal(f.win.ignore, false);
+});
+test('the operating-system animation flag alone does not freeze follow', t => {
+  const f = fixture(t); reduced = true;
+  f.controller.setFollowEnabled(true); f.advance(1500);
+  assert.ok(f.win.moves.length > 0);
+  assert.equal(f.controller.isFollowing(), true);
 });
 test('tray follow checkbox is available in production and reflects runtime state', () => {
   const common = { onShow() {}, onHide() {}, onWake() {}, onSleep() {}, onOpenChat() {},
@@ -227,8 +234,9 @@ test('main explicitly arbitrates wandering versus follow without persisting it o
   assert.doesNotMatch(follow, /!dev/); assert.match(follow, /disableWander/);
   assert.match(follow, /overlay\.setFollowEnabled\(enabled\)/);
   assert.match(wander, /overlay\.setFollowEnabled\(false\)/);
-  assert.doesNotMatch(follow, /preferenceStore|\.wake\(|fetch\(|qwen|transcribe/);
-  assert.doesNotMatch(readFileSync(path.join(root, 'src/shared/userPreferences.ts'), 'utf8'), /[Ff]ollow/);
+  assert.match(follow, /followCursor/);
+  assert.doesNotMatch(follow, /\.wake\(|fetch\(|qwen|transcribe/);
+  assert.match(readFileSync(path.join(root, 'src/shared/userPreferences.ts'), 'utf8'), /followCursor/);
   const overlay = readFileSync(path.join(root, 'src/main/overlayWindow.ts'), 'utf8');
   assert.equal((overlay.match(/setInterval\(sampleAndApply, intervalMs\)/g) ?? []).length, 1);
   assert.equal((overlay.match(/setInterval\(tickTravel, 32\)/g) ?? []).length, 1);

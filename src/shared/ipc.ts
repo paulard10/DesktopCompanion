@@ -110,7 +110,7 @@ export const IpcChannels = {
 } as const;
 
 /** Home has no movement, capture-region, filesystem or generic IPC capability. */
-export type HomeFeedback = 'pulse' | 'busy' | 'docked' | 'idle' | 'blocked';
+export type HomeFeedback = 'pulse' | 'busy' | 'docked' | 'idle' | 'asleep' | 'blocked';
 export interface HomeBridge {
   notifyReady: () => void;
   notifyClick: () => void;
@@ -140,6 +140,8 @@ export interface CursorSample {
   at: number;
   /** Main-owned temporary input suppression during experimental follow. */
   inputSuppressed?: boolean;
+  /** User reduced-motion preference. Key state is not included. */
+  calm?: boolean;
 }
 
 export interface ChatLineMessage {
