@@ -67,15 +67,15 @@ test('the Windows package allowlist keeps secrets, Whisper, and research out of 
   assert.match(config, /allowElevation: false/);
   assert.match(config, /allowToChangeInstallationDirectory: false/);
   assert.match(config, /createStartMenuShortcut: true/);
-  assert.match(config, /createDesktopShortcut: false/);
+  assert.match(config, /createDesktopShortcut: true/);
   assert.match(config, /runAfterFinish: false/);
   assert.match(config, /packElevateHelper: false/);
   assert.match(config, /deleteAppDataOnUninstall: false/);
   assert.match(config, /differentialPackage: false/);
-  assert.match(config, /shortcutName: DesktopCompanion/);
-  assert.match(config, /uninstallDisplayName: DesktopCompanion/);
+  assert.match(config, /shortcutName: Wordsy/);
+  assert.match(config, /uninstallDisplayName: Wordsy/);
   assert.match(config, /include: installer\.nsh/);
-  assert.match(config, /artifactName: DesktopCompanion-Setup-\$\{version\}-\$\{arch\}\.\$\{ext\}/);
+  assert.match(config, /artifactName: Wordsy-Setup-\$\{version\}-\$\{arch\}\.\$\{ext\}/);
   assert.match(config, /asar: true/);
   assert.match(config, /- assets\/tray\.png/);
   assert.match(config, /publish: null/);
@@ -105,7 +105,7 @@ test('the Windows package allowlist keeps secrets, Whisper, and research out of 
   assert.match(manifest, /"package:installer": "npm run build && electron-builder --win nsis --x64"/);
   assert.equal(manifest.includes('"productName"'), false);
   assert.match(manifest, /"name": "desktop-companion"/);
-  assert.match(manifest, /"version": "0\.1\.2"/);
+  assert.match(manifest, /"version": "0\.2\.0-beta\.1"/);
   const main = read('src/main/main.ts');
   assert.match(main, /user-preferences\.json/);
   assert.match(main, /app\.getPath\('userData'\)/);

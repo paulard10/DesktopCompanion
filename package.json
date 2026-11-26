@@ -1,8 +1,8 @@
 {
   "name": "desktop-companion",
-  "version": "0.1.2",
+  "version": "0.2.0-beta.1",
   "private": true,
-  "description": "Windows desktop companion overlay with a procedural 3D robot and a demo chat window.",
+  "description": "Wordsy, a Windows desktop companion. The installed app id remains desktop-companion.",
   "main": "dist/main/main.js",
   "engines": {
     "node": ">=22.12.0"

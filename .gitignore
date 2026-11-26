@@ -25,3 +25,8 @@ release/
 screenshots/
 captures/
 *.webp
+art/
+src/renderer/design-lab.html
+src/renderer/design-lab.css
+src/renderer/design-lab.ts
+src/renderer/design-lab/

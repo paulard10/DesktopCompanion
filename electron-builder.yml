@@ -49,12 +49,12 @@ nsis:
   allowElevation: false
   allowToChangeInstallationDirectory: false
   createStartMenuShortcut: true
-  createDesktopShortcut: false
+  createDesktopShortcut: true
   runAfterFinish: false
   packElevateHelper: false
   deleteAppDataOnUninstall: false
   differentialPackage: false
-  shortcutName: DesktopCompanion
-  uninstallDisplayName: DesktopCompanion
+  shortcutName: Wordsy
+  uninstallDisplayName: Wordsy
   include: installer.nsh
-  artifactName: DesktopCompanion-Setup-${version}-${arch}.${ext}
+  artifactName: Wordsy-Setup-${version}-${arch}.${ext}
