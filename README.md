@@ -47,7 +47,7 @@ The installer is prepared as an unpublished GitHub Release draft. It is not on t
 
 1. Run the installer.
 2. Accept the current-user install. The folder cannot be changed, and the installer does not elevate.
-3. Open **Wordsy** from the Start menu or the desktop shortcut.
+3. Open **Wordsy** from the Start menu. A new install also adds a desktop shortcut named Wordsy. Upgrading from 0.1.2 keeps the existing Start menu shortcut and does not add a desktop shortcut.
 4. Quit from the tray icon. Closing the chat window does not quit the app.
 
 The shortcut name is Wordsy. The program file remains `DesktopCompanion.exe`. Settings stay in:
