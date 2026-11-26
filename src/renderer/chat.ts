@@ -574,7 +574,7 @@ if (
     if (body) {
       body.textContent = text;
     }
-    announce.textContent = `Companion. ${text}`;
+    announce.textContent = `Worthsi. ${text}`;
     if (stickToBottom) {
       scrollToEnd();
     } else {
@@ -1114,7 +1114,7 @@ function label(role: ChatLine['role']): string {
   if (role === 'demo') {
     return 'Demo';
   }
-  return 'Companion';
+  return 'Worthsi';
 }
 
 function applyStatus(

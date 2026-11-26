@@ -1,6 +1,6 @@
 # Third-party notices
 
-Wordsy includes or is built with the following components. Each remains under its own license. This file is a notice, not a grant of those licenses.
+Worthsi includes or is built with the following components. Each remains under its own license. This file is a notice, not a grant of those licenses.
 
 | Component | Role | License |
 | --- | --- | --- |
@@ -11,4 +11,4 @@ Wordsy includes or is built with the following components. Each remains under it
 | TypeScript | Source language | Apache-2.0 |
 | electron-builder | Windows installer build tool | MIT |
 
-The installer does not include a Whisper executable or model. Wordsy does not download one.
+The installer does not include a Whisper executable or model. Worthsi does not download one.

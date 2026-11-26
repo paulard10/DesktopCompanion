@@ -43,7 +43,7 @@ export function createTray(options: {
   onSelectScreenArea?: () => void;
 }): CompanionTray {
   const tray = new Tray(loadTrayImage());
-  tray.setToolTip('Desktop Companion');
+  tray.setToolTip('Worthsi');
 
   const refresh = (): void => {
     tray.setContextMenu(buildMenu());

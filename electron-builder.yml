@@ -54,7 +54,7 @@ nsis:
   packElevateHelper: false
   deleteAppDataOnUninstall: false
   differentialPackage: false
-  shortcutName: Wordsy
-  uninstallDisplayName: Wordsy
+  shortcutName: Worthsi
+  uninstallDisplayName: Worthsi
   include: installer.nsh
-  artifactName: Wordsy-Setup-${version}-${arch}.${ext}
+  artifactName: Worthsi-Setup-${version}-${arch}.${ext}

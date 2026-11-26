@@ -210,6 +210,7 @@ test('chat close hides the chat window and quit destroys both windows', () => {
   assert.equal(isChatRendererUrl('app://companion/index.html', false), false);
 
   const chrome = createChatChrome();
+  assert.equal(chrome.title, 'Worthsi');
   assert.equal(chrome.frame, false);
   assert.equal(chrome.alwaysOnTop, false);
   assert.equal(chrome.focusable, true);

@@ -66,6 +66,6 @@ export function createChatChrome(): ChatChrome {
     backgroundMaterial: 'none',
     roundedCorners: true,
     autoHideMenuBar: true,
-    title: 'Companion',
+    title: 'Worthsi',
   };
 }

@@ -285,7 +285,7 @@ export function createTrailWindow(options: {
       y: 0,
       width: 32,
       height: 32,
-      title: 'Desktop Companion Trail',
+      title: 'Worthsi Trail',
       webPreferences: createOverlayWebPreferences(options.preloadPath, options.dev),
     });
     // Windows paints the default window color, white, through a transparent page

@@ -1,26 +1,26 @@
-# Worthsi
+# WORTHSI
 
-A small Windows desktop companion. Wordsy is a 3D robot that lives on your desktop, follows the cursor, and opens a chat when you want to talk.
+A small Windows desktop companion. Worthsi is a 3D robot that lives on your desktop, follows the cursor, and opens a chat when you want to talk.
 
-The public name is Wordsy. This repository is still called DesktopCompanion, and the installed program keeps that internal name so existing settings and saved notes stay in the same Windows profile.
+The product name is Worthsi. This repository is still called DesktopCompanion, and the installed program keeps that internal name so existing settings and saved notes stay in the same Windows profile.
 
-![Wordsy on the desktop](docs/readme/wordsy-robot.png)
+![Worthsi on the desktop](docs/readme/worthsi-robot.png)
 
-![Wordsy chat in demo mode](docs/readme/wordsy-chat.png)
+![Worthsi chat in demo mode](docs/readme/worthsi-chat.png)
 
 ## What it does
 
 - Shows a procedural 3D robot on the desktop, with a small Home base.
 - Follows the cursor, wanders in Free Roam, and leaves a short neon trail while it travels.
 - Sleeps at Home. A double-click on Home, or Sleep in the tray, puts it to sleep. It also sleeps on its own after 60 seconds awake at Home. Sleep is remembered after a restart.
-- Opens a chat from the robot, the chat badge, or the tray. Closing the chat leaves Wordsy running. Quit is in the tray menu.
+- Opens a chat from the robot, the chat badge, or the tray. Closing the chat leaves Worthsi running. Quit is in the tray menu.
 - Runs a local Demo mode with no network connection.
 - Can use Qwen when you add your own API key.
 - Speaks replies with a Windows voice that is already installed on the PC.
 - Can open Calculator, Notepad, or File Explorer, and can save a plain `.txt` note, only after you confirm the action.
 - Can remember up to 20 short personal notes on this PC.
 
-Wordsy does not control arbitrary Windows apps, and it is not an always-on voice assistant.
+Worthsi does not control arbitrary Windows apps, and it is not an always-on voice assistant.
 
 ## System requirements
 
@@ -31,30 +31,36 @@ Wordsy does not control arbitrary Windows apps, and it is not an always-on voice
 | Graphics | WebGL. A dedicated GPU is not required. |
 | Account | Current user. The installer does not request administrator rights. |
 
-Wordsy was developed on one Windows 11 laptop with an Intel i5-1235U, 8 GB of RAM, and Intel Iris Xe graphics. Those are the conditions used for testing, not a measured minimum for every PC.
+Worthsi was developed on one Windows 11 laptop with an Intel i5-1235U, 8 GB of RAM, and Intel Iris Xe graphics. Those are the conditions used for testing, not a measured minimum for every PC.
 
 Mac and Linux are not supported.
 
 ## Installation
 
-The beta installer is:
+The published public beta is the historical installer:
 
 `Wordsy-Setup-0.2.0-beta.1-x64.exe`
 
-It is unsigned. Windows SmartScreen can show a warning before it runs. Wordsy does not bypass that warning or change Windows security settings.
+That file still displays Wordsy. It has not been renamed or rebuilt, and its published checksum is unchanged. Shortcuts and the uninstall entry from that beta say Wordsy.
 
-The installer is prepared as an unpublished GitHub Release draft. It is not on the public Releases page until that draft is published.
+The next beta, prepared in source as 0.2.0-beta.2, is not published yet. When it is built, the installer file is:
+
+`Worthsi-Setup-0.2.0-beta.2-x64.exe`
+
+A new install of that version uses a Start menu shortcut and a desktop shortcut named Worthsi, and Windows Apps lists Worthsi. Upgrading over the published beta keeps the same program file and the same settings folder. An existing Wordsy shortcut from that beta can remain until a new install creates the Worthsi shortcut.
+
+Both installers are unsigned. Windows SmartScreen can show a warning before either one runs. Worthsi does not bypass that warning or change Windows security settings.
 
 1. Run the installer.
 2. Accept the current-user install. The folder cannot be changed, and the installer does not elevate.
-3. Open **Wordsy** from the Start menu. A new install also adds a desktop shortcut named Wordsy. Upgrading from 0.1.2 keeps the existing Start menu shortcut and does not add a desktop shortcut.
+3. Open the app from the Start menu. The published beta shortcut is named Wordsy. A new Worthsi install adds a shortcut named Worthsi. Upgrading from 0.1.2 keeps the existing Start menu shortcut and does not add a desktop shortcut.
 4. Quit from the tray icon. Closing the chat window does not quit the app.
 
-The shortcut name is Wordsy. The program file remains `DesktopCompanion.exe`. Settings stay in:
+The program file remains `DesktopCompanion.exe`. Settings, encrypted notes, and the optional Qwen key stay in:
 
 `%APPDATA%\desktop-companion`
 
-Uninstall from Windows Settings. Uninstall does not delete that folder, so notes and settings remain. Wordsy does not turn on “open at login” unless you enable it from the tray.
+Uninstall from Windows Settings. Uninstall does not delete that folder, so notes and settings remain. Worthsi does not turn on “open at login” unless you enable it from the tray.
 
 ## Demo mode
 
@@ -67,7 +73,7 @@ You can connect Alibaba Cloud Model Studio (Singapore), model `qwen3.7-plus`, fr
 Nothing is sent until you choose Qwen and send a message, confirm a screen question, or use a clipboard action. When you do:
 
 - The message you send is sent to the configured endpoint.
-- Saved memory is not included unless you turn sharing on. When it is on, only the newest 8 notes are included. Each note is limited to 240 characters, and Wordsy stores at most 20.
+- Saved memory is not included unless you turn sharing on. When it is on, only the newest 8 notes are included. Each note is limited to 240 characters, and Worthsi stores at most 20.
 - Clipboard text is sent only from **Ask about copied text**. The menu offers Explain, Summarize, Translate, and Ask anything. The text is capped at 4000 characters, treated as untrusted, not watched, and not saved.
 - A screen question sends one image, once, after you drag a rectangle and confirm. There is no retry and no background capture.
 
@@ -81,25 +87,25 @@ Microphone audio is not uploaded.
 
 ## Windows actions
 
-Wordsy can launch only:
+Worthsi can launch only:
 
 - Calculator
 - Notepad
 - File Explorer
 - a plain `.txt` note that it writes for you
 
-Each action shows a confirmation card first. Wordsy does not run a shell, and it does not take a file path from the chat.
+Each action shows a confirmation card first. Worthsi does not run a shell, and it does not take a file path from the chat.
 
 ## Privacy
 
-Wordsy has no telemetry. Preferences, encrypted memory, and the optional Qwen key stay in `%APPDATA%\desktop-companion`. The robot ignores clicks outside its body, the chat badge, and the screen button, so the desktop underneath remains usable. Click-through does not work over windows that run with administrator rights.
+Worthsi has no telemetry. Preferences, encrypted memory, and the optional Qwen key stay in `%APPDATA%\desktop-companion`. The robot ignores clicks outside its body, the chat badge, and the screen button, so the desktop underneath remains usable. Click-through does not work over windows that run with administrator rights.
 
 ## Known limitations
 
 - Windows 11 x64 only.
 - The installer is unsigned, so SmartScreen may warn.
 - Local transcription is not in the installer.
-- Free Roam does not fall asleep on its own. Auto-sleep happens only while Wordsy is awake at Home.
+- Free Roam does not fall asleep on its own. Auto-sleep happens only while Worthsi is awake at Home.
 - The click-through overlay cannot pass clicks through elevated windows.
 - Screen questions and Qwen replies depend on your own API key and network.
 
@@ -109,7 +115,7 @@ Open an issue on this repository:
 
 https://github.com/paulard10/DesktopCompanion/issues
 
-Include the Wordsy version, your Windows version, and what you expected to happen. Do not paste API keys, memory exports, or private screen text.
+Include the Worthsi version, your Windows version, and what you expected to happen. Do not paste API keys, memory exports, or private screen text.
 
 ## Development
 
@@ -129,7 +135,7 @@ npm run package:installer
 
 `npm run package:win` writes an unpacked app under `release/`. `npm run package:installer` writes the NSIS installer there as well. The `release/` folder is not part of the Git history.
 
-Quit a running Wordsy from the tray before starting another copy. A second launch exits because only one instance is allowed.
+Quit a running Worthsi from the tray before starting another copy. A second launch exits because only one instance is allowed.
 
 Stack: Electron 44, TypeScript 7, Vite 8, Three.js, koffi, and electron-builder. Third-party packages remain under their own licenses. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 

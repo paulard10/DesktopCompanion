@@ -120,7 +120,7 @@ export function createHomeWindow(options: {
       const bounds = placeDockableHome(screen.getPrimaryDisplay().workArea);
       if (!bounds) { failClosed(); return; }
       const created = new BrowserWindow({ ...createOverlayChrome(), ...bounds,
-        title: 'Desktop Companion Home', webPreferences: createOverlayWebPreferences(options.preloadPath, false) });
+        title: 'Worthsi Home', webPreferences: createOverlayWebPreferences(options.preloadPath, false) });
       win = created;
       created.setBackgroundMaterial('none');
       created.setBackgroundColor('#00000000');

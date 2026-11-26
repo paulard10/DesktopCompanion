@@ -111,7 +111,7 @@ export function createOverlayWindow(options: {
   const win = new BrowserWindow({
     ...bounds,
     ...createOverlayChrome(),
-    title: 'Desktop Companion',
+    title: 'Worthsi',
     webPreferences: createOverlayWebPreferences(options.preloadPath, options.dev),
   });
 
