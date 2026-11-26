@@ -6,7 +6,7 @@ The product name is Worthsi. This repository is still called DesktopCompanion, a
 
 ![Worthsi on the desktop](docs/readme/worthsi-robot.png)
 
-![Worthsi chat in demo mode](docs/readme/worthsi-chat.png)
+![Worthsi chat](docs/readme/worthsi-chat.png)
 
 ## What it does
 
@@ -37,23 +37,25 @@ Mac and Linux are not supported.
 
 ## Installation
 
-The published public beta is the historical installer:
+The published public beta remains the historical installer:
 
 `Wordsy-Setup-0.2.0-beta.1-x64.exe`
 
-That file still displays Wordsy. It has not been renamed or rebuilt, and its published checksum is unchanged. Shortcuts and the uninstall entry from that beta say Wordsy.
+That file still displays Wordsy. It has not been renamed or rebuilt, and its published checksum is unchanged.
 
-The next beta, prepared in source as 0.2.0-beta.2, is not published yet. When it is built, the installer file is:
+Worthsi 0.2.0-beta.2 is the current build. Its installer is:
 
 `Worthsi-Setup-0.2.0-beta.2-x64.exe`
 
-A new install of that version uses a Start menu shortcut and a desktop shortcut named Worthsi, and Windows Apps lists Worthsi. Upgrading over the published beta keeps the same program file and the same settings folder. An existing Wordsy shortcut from that beta can remain until a new install creates the Worthsi shortcut.
+That installer is attached to a GitHub pre-release draft, tag `v0.2.0-beta.2`. The draft is not a public download until it is published. The published beta.1 release and its files stay as they are.
+
+A beta.2 install uses a Start menu shortcut and a desktop shortcut named Worthsi, and Windows Apps lists Worthsi. Upgrading over beta.1 keeps `DesktopCompanion.exe` and the same settings folder.
 
 Both installers are unsigned. Windows SmartScreen can show a warning before either one runs. Worthsi does not bypass that warning or change Windows security settings.
 
 1. Run the installer.
 2. Accept the current-user install. The folder cannot be changed, and the installer does not elevate.
-3. Open the app from the Start menu. The published beta shortcut is named Wordsy. A new Worthsi install adds a shortcut named Worthsi. Upgrading from 0.1.2 keeps the existing Start menu shortcut and does not add a desktop shortcut.
+3. Open the app from the Start menu. Beta.2 shortcuts are named Worthsi. The published beta.1 installer uses a shortcut named Wordsy. Upgrading from 0.1.2 keeps the existing Start menu shortcut and does not add a desktop shortcut.
 4. Quit from the tray icon. Closing the chat window does not quit the app.
 
 The program file remains `DesktopCompanion.exe`. Settings, encrypted notes, and the optional Qwen key stay in:
