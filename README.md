@@ -1,4 +1,4 @@
-# Wordsy
+# Worthsi
 
 A small Windows desktop companion. Wordsy is a 3D robot that lives on your desktop, follows the cursor, and opens a chat when you want to talk.
 
