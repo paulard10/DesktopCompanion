@@ -162,7 +162,8 @@ export function createProceduralRobot(): AvatarAdapter {
       const pair = matchedEyeScale(eyesFromPose(pose));
       applyEye(leftEye, pair.left, leftBaseY, lookYaw, pose.eyePitch, pose.blink, pose.glow, leftEyeMaterial, leftCatchMaterial, leftCatchlight);
       applyEye(rightEye, pair.right, rightBaseY, lookYaw, pose.eyePitch, pose.blink, pose.glow, rightEyeMaterial, rightCatchMaterial, rightCatchlight);
-      paint(cheekMaterial, CHEEK, pose.glow);
+      const cheekGlow = pose.glow * ((pair.left.glow + pair.right.glow) / 2);
+      paint(cheekMaterial, CHEEK, cheekGlow);
       paint(tipMaterial, TIP, pose.glow);
       paint(ringMaterial, EYE, pose.glow);
       leftCatchMaterial.color.setScalar(pose.glow);
@@ -177,10 +178,12 @@ export function createProceduralRobot(): AvatarAdapter {
       const rightLift = motion?.rightArmLift ?? 0;
       leftArm.rotation.x = leftRest.x + relax * 0.28;
       leftArm.rotation.z = leftRest.z * (1 - relax * 0.45) + leftLift;
-      leftElbow.rotation.z = leftRest.elbow - relax * 0.22;
+      const leftWag = leftLift > rightLift + 0.08 ? Math.sin(nowMs / 180) * 0.12 * leftLift : 0;
+      const rightWag = rightLift > leftLift + 0.08 ? Math.sin(nowMs / 180) * 0.12 * rightLift : 0;
+      leftElbow.rotation.z = leftRest.elbow - relax * 0.22 - leftLift * 0.4 + leftWag;
       rightArm.rotation.x = rightRest.x + relax * 0.28;
       rightArm.rotation.z = rightRest.z * (1 - relax * 0.45) - rightLift;
-      rightElbow.rotation.z = rightRest.elbow + relax * 0.22;
+      rightElbow.rotation.z = rightRest.elbow + relax * 0.22 + rightLift * 0.4 - rightWag;
       const probe = pose.rigProbe;
       const probeAge = probe ? nowMs - probe.startedAt : -1;
       const probePose = probe ? rigProbeOffset(probe.name, probeAge) : null;

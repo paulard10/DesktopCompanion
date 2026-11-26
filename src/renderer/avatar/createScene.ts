@@ -266,6 +266,7 @@ export function createCompanionScene(canvas: HTMLCanvasElement, onFirstFrame: ()
   return {
     pulse(nowMs: number): void {
       avatar.pulse(nowMs);
+      director.react(nowMs);
     },
     wake(nowMs: number): void {
       const wasSleeping = director.isSleeping();

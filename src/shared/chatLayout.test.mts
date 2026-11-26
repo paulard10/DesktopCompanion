@@ -17,8 +17,8 @@ test('the conversation column keeps the welcome text off the composer', () => {
   const css = readFileSync(path.join(root, 'src/renderer/chat.css'), 'utf8');
   const log = html.indexOf('id="log"');
   const composer = html.indexOf('id="composer"');
-  const developer = html.indexOf('id="developer"');
-  assert.ok(log > 0 && log < composer && composer < developer);
+  const live = html.indexOf('id="live"');
+  assert.ok(log > 0 && log < composer && composer < live);
   assert.ok(html.indexOf('</form>') < html.indexOf('id="clear"'));
   assert.match(html, /class="frame"/);
   assert.match(html, /id="thread"/);
@@ -31,16 +31,14 @@ test('the conversation column keeps the welcome text off the composer', () => {
   assert.match(html, /id="tts-stop"/);
   assert.match(html, /Enter sends/);
   const connection = html.slice(html.indexOf('<details id="connection"'), html.indexOf('>', html.indexOf('<details id="connection"')) + 1);
-  const tools = html.slice(html.indexOf('<details id="developer"'), html.indexOf('>', html.indexOf('<details id="developer"')) + 1);
   const settings = html.slice(html.indexOf('<div id="settings"'), html.indexOf('>', html.indexOf('<div id="settings"')) + 1);
   assert.equal(/\sopen[\s>]/.test(connection), false);
-  assert.equal(/\sopen[\s>]/.test(tools), false);
   assert.match(settings, /\shidden[\s>]/);
   assert.equal(html.includes('id="mic-tap"'), false);
   assert.equal(html.includes('id="mic-hold"'), false);
   assert.match(html, /id="hold-to-talk"(?![^>]*checked)/);
-  assert.match(tools, /\shidden[\s>]/);
-  assert.match(html, /Developer Tools/);
+  assert.equal(html.includes('id="developer"'), false);
+  assert.equal(html.includes('Developer Tools'), false);
   assert.equal(html.includes('Dev preview'), false);
   assert.equal(html.includes('Test left arm'), false);
   const frame = rule(css, '.frame');
@@ -48,7 +46,6 @@ test('the conversation column keeps the welcome text off the composer', () => {
   const history = rule(css, '.thread');
   const empty = rule(css, '.empty');
   const dock = rule(css, '.dock');
-  const panel = rule(css, '.dev-panel');
   assert.match(frame, /flex-direction: column/);
   assert.match(frame, /min-height: 0/);
   assert.match(frame, /overflow: hidden/);
@@ -57,23 +54,20 @@ test('the conversation column keeps the welcome text off the composer', () => {
   assert.match(history, /overflow: auto/);
   assert.match(history, /min-height: 0/);
   assert.match(dock, /flex: 0 0 auto/);
-  assert.match(panel, /overflow: auto/);
-  assert.match(panel, /max-height: 112px/);
+  assert.equal(css.includes('.dev-panel'), false);
+  assert.equal(css.includes('.developer'), false);
   assert.equal(empty.includes('position:'), false);
   assert.equal(rule(css, '.composer').includes('position:'), false);
 });
 
-test('developer tools stay out of production and keep their controls behind one section', () => {
+test('developer expression controls stay out of the chat', () => {
   const chat = readFileSync(path.join(root, 'src/renderer/chat.ts'), 'utf8');
-  const start = chat.indexOf('if (import.meta.env.DEV)');
-  const block = chat.slice(start, chat.indexOf("composer.addEventListener('input'"));
-  assert.match(block, /#developer/);
-  assert.match(block, /tools\.hidden = false/);
-  assert.match(block, /panel\.append\(preview, diagnostics\)/);
-  assert.match(block, /Compare/);
-  assert.match(block, /Test window move/);
-  assert.equal(block.includes('.open'), false);
-  assert.equal(chat.slice(0, start).includes('Test left arm'), false);
+  assert.equal(chat.includes('import.meta.env.DEV'), false);
+  assert.equal(chat.includes('#developer'), false);
+  assert.equal(chat.includes('previewPresence'), false);
+  assert.equal(chat.includes('Dev preview'), false);
+  assert.equal(chat.includes('Test window move'), false);
+  assert.equal(chat.includes('Test left arm'), false);
   assert.match(chat, /event\.key === 'Enter' && !event\.shiftKey/);
   assert.match(chat, /form\.requestSubmit\(\)/);
   assert.match(chat, /thread\.scrollTop = thread\.scrollHeight/);

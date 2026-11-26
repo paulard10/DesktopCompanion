@@ -76,7 +76,7 @@ export function clickPulseScale(startedAtMs: number | null, nowMs: number): numb
   if (elapsed < 0 || elapsed >= CLICK_PULSE_MS) {
     return 1;
   }
-  return 1 + Math.sin((elapsed / CLICK_PULSE_MS) * Math.PI) * 0.035;
+  return 1 + Math.sin((elapsed / CLICK_PULSE_MS) * Math.PI) * 0.05;
 }
 
 function wave(timeMs: number, periodMs: number, phaseTurns: number): number {

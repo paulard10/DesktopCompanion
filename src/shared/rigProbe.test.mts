@@ -69,16 +69,14 @@ test('the probe writes the visible rig nodes and does not scale the body', () =>
 
 test('rig diagnostics and the window test stay in development and use the travel controller', () => {
   const chat = readFileSync(path.join(root, 'src/renderer/chat.ts'), 'utf8');
-  const preview = chat.slice(chat.indexOf('if (import.meta.env.DEV)'), chat.indexOf("composer.addEventListener('input'"));
-  assert.match(preview, /Test left arm/);
-  assert.match(preview, /Test right arm/);
-  assert.match(preview, /Test antenna/);
-  assert.match(preview, /Test body tilt/);
-  assert.equal(preview.includes('Test head tilt'), false);
-  assert.equal(preview.includes('PROBE_HEAD'), false);
-  assert.match(preview, /Reset rig/);
-  assert.match(preview, /Test window move/);
-  assert.equal(chat.slice(0, chat.indexOf('if (import.meta.env.DEV)')).includes('Test left arm'), false);
+  assert.equal(chat.includes('Test left arm'), false);
+  assert.equal(chat.includes('Test right arm'), false);
+  assert.equal(chat.includes('Test antenna'), false);
+  assert.equal(chat.includes('Test body tilt'), false);
+  assert.equal(chat.includes('Test head tilt'), false);
+  assert.equal(chat.includes('PROBE_HEAD'), false);
+  assert.equal(chat.includes('Reset rig'), false);
+  assert.equal(chat.includes('Test window move'), false);
   const main = readFileSync(path.join(root, 'src/main/main.ts'), 'utf8');
   const tray = readFileSync(path.join(root, 'src/main/tray.ts'), 'utf8');
   assert.match(main, /move-test received source=/);

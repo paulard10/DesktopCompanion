@@ -30,8 +30,10 @@ export function idleBeat(now: number): IdleBeat {
 /** Both eyes move together. Size stays matched. */
 export function applyIdleEyes(pair: EyePair, act: IdleAct): void {
   if (act === 'glance') {
-    pair.left.gazeYaw = 0.07;
-    pair.right.gazeYaw = 0.07;
+    pair.left.gazeYaw = 0.1;
+    pair.right.gazeYaw = 0.1;
+    pair.left.openness = 1.06;
+    pair.right.openness = 1.06;
     return;
   }
   if (act === 'lookup') {

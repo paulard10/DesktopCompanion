@@ -490,7 +490,9 @@ test('chat IPC and storage stay out of the renderer', () => {
   }
   assert.equal(windowSource.includes('if (!options.dev'), true);
   assert.equal(windowSource.includes('chat:preview-presence') || windowSource.includes('chatPreviewPresence'), true);
-  assert.equal(chat.includes('import.meta.env.DEV'), true);
+  assert.equal(chat.includes('import.meta.env.DEV'), false);
+  assert.equal(chat.includes('previewPresence'), false);
+  assert.equal(html.includes('Developer Tools'), false);
   assert.equal(html.includes('Dev preview'), false);
   const store = readFileSync(path.join(root, 'src/main/safeCredentialStore.ts'), 'utf8');
   const chatMain = readFileSync(path.join(root, 'src/main/chatWindow.ts'), 'utf8');

@@ -238,14 +238,8 @@ test('presence names stay the same and sleep still ignores them', () => {
 
 test('eye preview is development-only and the director owns the eye step', () => {
   const chat = readFileSync(path.join(root, 'src/renderer/chat.ts'), 'utf8');
-  const previewStart = chat.indexOf('if (import.meta.env.DEV)');
-  const preview = chat.slice(previewStart, chat.indexOf("composer.addEventListener('input'"));
-  assert.match(preview, /Curious/);
-  assert.match(preview, /Sleeping/);
-  assert.match(preview, /Blink/);
-  assert.match(preview, /Compare/);
-  assert.match(preview, /Idle', 'IDLE', 'Listening'/);
-  assert.equal(chat.slice(0, previewStart).includes('Curious'), false);
+  assert.equal(chat.includes('previewPresence'), false);
+  assert.equal(chat.includes('Dev preview'), false);
   const chatWindow = readFileSync(path.join(root, 'src/main/chatWindow.ts'), 'utf8');
   assert.match(chatWindow, /if \(!options\.dev/);
   const face = readFileSync(path.join(root, 'src/shared/faceExpression.ts'), 'utf8');

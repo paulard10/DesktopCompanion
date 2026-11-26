@@ -237,9 +237,8 @@ test('preferences stay local and leave the validated product boundaries alone', 
   }, 1_000);
   assert.equal(idle.spawned.length, 0);
   const page = read('src/renderer/chat.ts');
-  const devTools = page.slice(page.indexOf('if (import.meta.env.DEV)'), page.indexOf("composer.addEventListener('input'"));
-  assert.match(devTools, /Test window move/);
-  assert.equal(page.slice(0, page.indexOf('if (import.meta.env.DEV)')).includes('Test body tilt'), false);
+  assert.equal(page.includes('Test window move'), false);
+  assert.equal(page.includes('Test body tilt'), false);
   const tray = read('src/main/tray.ts');
   assert.equal(tray.slice(0, tray.indexOf('options.devMovement')).includes('Test window move'), false);
   assert.match(tray.slice(tray.indexOf('options.devMovement')), /Test window move/);

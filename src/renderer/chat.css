@@ -530,7 +530,7 @@ textarea::placeholder { color: #8d877d; }
   font-size: 13px;
 }
 
-.conversation-live[hidden], .voice-phase[hidden], .speech-controls[hidden], .settings[hidden], .tts-bar[hidden], .developer[hidden] {
+.conversation-live[hidden], .voice-phase[hidden], .speech-controls[hidden], .settings[hidden], .tts-bar[hidden] {
   display: none;
 }
 
@@ -759,44 +759,6 @@ textarea::placeholder { color: #8d877d; }
 .clear:hover { color: #8d2d2d; }
 
 #speech-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-
-.developer { border-top: 1px solid #e7e1d6; }
-
-.developer summary {
-  padding: 6px 12px;
-  color: #6f6a62;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.dev-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 112px;
-  overflow: auto;
-  padding: 0 10px 8px;
-}
-
-.preview {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-}
-
-.preview .hint { flex: 1 0 100%; }
-
-.preview button {
-  border: 1px solid #e0d9cd;
-  border-radius: 999px;
-  background: #fffdf8;
-  color: #1c1f24;
-  font-size: 11px;
-  padding: 4px 8px;
-  cursor: pointer;
-}
 
 button:focus-visible, textarea:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible {
   outline: 2px solid #14171c;

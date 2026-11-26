@@ -316,10 +316,12 @@ test('the extra body motion still fits the click circle and the overlay', () => 
 
 test('the waking preview is development-only and cannot call the sleep clock', () => {
   const chat = readFileSync(path.join(root, 'src/renderer/chat.ts'), 'utf8');
-  const preview = chat.slice(chat.indexOf('if (import.meta.env.DEV)'), chat.indexOf("composer.addEventListener('input'"));
-  assert.match(preview, /Waking/);
-  assert.match(preview, /'WAKING'/);
-  assert.equal(chat.slice(0, chat.indexOf('if (import.meta.env.DEV)')).includes('Waking'), false);
+  assert.equal(chat.includes('Waking'), false);
+  assert.equal(chat.includes("'WAKING'"), false);
+  const director = readFileSync(path.join(root, 'src/renderer/avatar/characterDirector.ts'), 'utf8');
+  const waking = director.slice(director.indexOf("cue === 'WAKING'"), director.indexOf("cue === 'BLINK'"));
+  assert.equal(waking.includes('wake('), false);
+  assert.equal(waking.includes('reduceBehavior'), false);
 });
 
 function sample(

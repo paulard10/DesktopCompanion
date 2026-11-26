@@ -189,10 +189,9 @@ test('quit clears wander timers and the trail, and development tools stay gated'
   const quitAt = shutdown.indexOf('app.quit()');
   assert.ok(timerAt >= 0 && trailAt > timerAt && quitAt > trailAt);
   const chat = read('src/renderer/chat.ts');
-  const devTools = chat.slice(chat.indexOf('if (import.meta.env.DEV)'), chat.indexOf("composer.addEventListener('input'"));
-  assert.match(devTools, /Test body tilt/);
-  assert.match(devTools, /Test window move/);
-  assert.equal(chat.slice(0, chat.indexOf('if (import.meta.env.DEV)')).includes('Test body tilt'), false);
+  assert.equal(chat.includes('Test body tilt'), false);
+  assert.equal(chat.includes('Test window move'), false);
+  assert.equal(chat.includes('previewPresence'), false);
   const run = main.slice(main.indexOf('const runWander'), main.indexOf('const runMoveTest'));
   assert.equal(run.includes('dev'), false);
   const probe = main.slice(main.indexOf('const runMoveTest'), main.indexOf('const noteManualMove'));

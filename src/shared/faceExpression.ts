@@ -153,10 +153,11 @@ export function writeEyeTarget(cue: EyeCue, now: number, reducedMotion: boolean,
     return;
   }
   if (cue === 'THINKING') {
+    const drift = still ? 0 : Math.sin(time / 1400) * 0.035;
     assign(
       out,
-      { openness: 0.9, curvature: 1, tilt: -0.08, gazeYaw: -0.05, gazePitch: -0.03, glow: 1 },
-      { openness: 0.9, curvature: 1, tilt: 0.08, gazeYaw: 0.05, gazePitch: -0.03, glow: 1 },
+      { openness: 0.86, curvature: 0.96, tilt: -0.1, gazeYaw: -0.055 + drift, gazePitch: -0.05, glow: 0.96 },
+      { openness: 0.86, curvature: 0.96, tilt: 0.1, gazeYaw: 0.055 + drift, gazePitch: -0.05, glow: 0.96 },
     );
     return;
   }
